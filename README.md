@@ -50,4 +50,4 @@ git diff --cached --name-only
 
 ## 许可
 
-暂无。发布到 GitHub 前建议补充 `LICENSE` 文件。
+[MIT](./LICENSE)
