@@ -1,0 +1,14 @@
+{
+  "deepseek": {
+    "key": "sk-<your-api-key>",
+    "type": "api_key"
+  },
+  "zhipu": {
+    "key": "<your-api-key>",
+    "type": "api_key"
+  },
+  "zhipu-coding-personal": {
+    "key": "<your-api-key>",
+    "type": "api_key"
+  }
+}

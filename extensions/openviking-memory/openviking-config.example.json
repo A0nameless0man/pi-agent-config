@@ -1,0 +1,10 @@
+{
+  "endpoint": "http://<openviking-host>:1933",
+  "autoCommit": {
+    "intervalMinutes": 10,
+    "enabled": true
+  },
+  "apiKey": "<your-api-key>",
+  "timeoutMs": 30000,
+  "enabled": true
+}

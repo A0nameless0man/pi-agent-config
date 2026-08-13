@@ -1,0 +1,30 @@
+# ---- 密钥 / 敏感信息 (绝不提交) ----
+auth.json
+models.json
+models-store.json
+extensions/openviking-memory/openviking-config.json
+
+# ---- 会话记录与运行时状态 ----
+sessions/
+backup/
+.codegraph/
+.pi-glla/
+extensions/openviking-memory/*.log
+extensions/openviking-memory/openviking-session-map.json
+
+# ---- 依赖与第三方内容 ----
+npm/
+git/
+bin/fd.exe
+
+# ---- 运行时状态文件 ----
+.glla-subagent-sync.json
+
+# ---- 编译产物 --
+__pycache__/
+*.pyc
+
+# ---- 系统与编辑器 ----
+.DS_Store
+Thumbs.db
+*.swp
