@@ -1,6 +1,6 @@
 ---
 name: switch-model
-description: 快速切换 pi 模型 provider profile(deepseek / zhipu / zhipu-coding-personal / zhipu-coding-company),一条命令批量改写 settings.json 默认模型/推理强度 + agents/ 下所有子 agent 的 model 和 thinking 定义。当用户说"切换模型""换模型""切到 xxx""用 xxx 跑""调推理强度"时使用。
+description: 快速切换 pi 模型 provider profile(deepseek / zhipu / zhipu-coding-personal / zhipu-coding-company),一条命令批量改写 settings.json 默认模型/推理强度 + agents/ 下 scout/planner/reviewer/worker 的 model 和 thinking 定义。当用户说"切换模型""换模型""切到 xxx""用 xxx 跑""调推理强度"时使用。
 ---
 
 # 切换模型 profile
@@ -32,7 +32,7 @@ bash ~/.pi/agent/switch-model.sh zhipu-coding-company
 | zhipu-coding-personal | zhipu-coding-personal/glm-5.2 / high | zhipu-coding-personal/glm-4.7 / low |
 | zhipu-coding-company | zhipu-coding-company/glm-5.2 / high | zhipu-coding-company/glm-4.7 / low |
 
-角色分工(默认):`scout` / `Explore` 用快速档(low),`planner`(medium)/ `reviewer` / `worker`(high)用主力档。
+角色分工(默认):`scout` 用快速档(low),`planner`(medium)/ `reviewer` / `worker`(high)用主力档。`Explore` 不在 profile 里,由 glla 管理(继承父模型)。
 
 thinking 合法取值:off / minimal / low / medium / high / xhigh / max。
 
@@ -41,7 +41,7 @@ thinking 合法取值:off / minimal / low / medium / high / xhigh / max。
 - 脚本改的是**默认值**:对新会话、之后新 spawn 的子 agent 生效。
 - **当前正在跑的会话不会自动切**,要立刻换模型/推理强度用 `/model`。
 - 切换会显式给 planner / reviewer / worker 写死 `model:` 和 `thinking:`(不再继承父模型);若某角色想保持继承,把该角色从 `profile.agents` 里删掉即可。
-- `Explore.md` 是 pi-goal-list-loop-audit 管理的;若 glla 之后重新同步覆盖了它,在 `/glla` 把 subagent strategy 调成 agent-default,或把 Explore 从 profile 里删掉。
+- `Explore.md` 由 pi-goal-list-loop-audit 管理,已从 profile 移除;switch 不碰它,Explore 继承父模型。若想显式控制 Explore,在 `/glla` 把 subagent strategy 调成 agent-default 并手动加回 profile。
 - 只调某个角色的推理强度而不换模型:直接改 `model-profiles.json` 里该角色的 `thinking`,再切一次(幂等),或直接编辑对应 `agents/<role>.md` 的 `thinking:` 行。
 - 用户只说"切到 zhipu"没给全名时,先无参列出,再按意图选。
 - 切换幂等,重复切同一 profile 无副作用。

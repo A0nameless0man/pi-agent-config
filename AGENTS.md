@@ -75,8 +75,9 @@ pi 核心工具仅包含 read / write / edit / bash,**没有 `task` 工具**。�
 -   **管理命令**:`/agents` 交互菜单(查看运行中 agent、创建/编辑自定义 agent、调整并发/嵌套深度等)
 
 **角色模型分工**(由 `model-profiles.json` 定义,`bash ~/.pi/agent/switch-model.sh <profile>` 切换):
--   `scout` / `Explore` — profile 快速档(flash)+ low thinking
+-   `scout` — profile 快速档(flash)+ low thinking
 -   `planner` / `reviewer` / `worker` — profile 主力档(pro),thinking medium / high / high
+-   `Explore` — 由 glla 管理、继承父模型,不在 profile 里
 -   每个角色在 profile 里同时配 model 与 thinking;切换批量改写 settings.json 默认模型/thinking + `agents/*.md` 各角色的 `model:`/`thinking:` 行
 -   profile:deepseek / zhipu / zhipu-coding-personal / zhipu-coding-company;当前会话立刻换用 `/model`
 
