@@ -74,9 +74,11 @@ pi 核心工具仅包含 read / write / edit / bash,**没有 `task` 工具**。�
 -   **上下文传递**:`Agent` 的 prompt 即任务交接文档,必须包含下方 目标 / 工作环境 / 约束条件 / 参考信息 四要素
 -   **管理命令**:`/agents` 交互菜单(查看运行中 agent、创建/编辑自定义 agent、调整并发/嵌套深度等)
 
-**角色模型分工**(已适配 deepseek):
--   `scout` — `deepseek/deepseek-v4-flash` + low thinking,快速侦察
--   `planner` / `reviewer` / `worker` — 继承父模型(默认 `deepseek-v4-pro`),thinking 分别为 medium / high / high
+**角色模型分工**(由 `model-profiles.json` 定义,`bash ~/.pi/agent/switch-model.sh <profile>` 切换):
+-   `scout` / `Explore` — profile 快速档(flash)+ low thinking
+-   `planner` / `reviewer` / `worker` — profile 主力档(pro),thinking medium / high / high
+-   每个角色在 profile 里同时配 model 与 thinking;切换批量改写 settings.json 默认模型/thinking + `agents/*.md` 各角色的 `model:`/`thinking:` 行
+-   profile:deepseek / zhipu / zhipu-coding-personal / zhipu-coding-company;当前会话立刻换用 `/model`
 
 ## 任务交接示例
 
