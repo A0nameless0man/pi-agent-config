@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# post-commit: 恢复 pre-commit 切走的 provider profile
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+STATE=".git/PI_HOOK_PROFILE_BEFORE"
+[ -f "$STATE" ] || exit 0
+
+CURRENT=$(cat "$STATE")
+rm -f "$STATE"
+
+[ -n "$CURRENT" ] || exit 0
+[ -f switch-model.sh ] || exit 0
+
+if bash switch-model.sh "$CURRENT" >/dev/null 2>&1; then
+  echo "[pi-hook] 已恢复 provider profile: $CURRENT" >&2
+else
+  echo "[pi-hook] 警告:恢复 $CURRENT 失败,请手动执行: bash switch-model.sh $CURRENT" >&2
+fi
+exit 0
