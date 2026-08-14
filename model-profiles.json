@@ -13,34 +13,34 @@
   "zhipu": {
     "provider": "zhipu",
     "model": "glm-5.2",
-    "thinking": "high",
+    "thinking": "max",
     "agents": {
       "scout": { "model": "zhipu/glm-4.7", "thinking": "low" },
       "planner": { "model": "zhipu/glm-5.2", "thinking": "medium" },
-      "reviewer": { "model": "zhipu/glm-5.2", "thinking": "high" },
-      "worker": { "model": "zhipu/glm-5.2", "thinking": "high" }
+      "reviewer": { "model": "zhipu/glm-5.2", "thinking": "max" },
+      "worker": { "model": "zhipu/glm-5.2", "thinking": "max" }
     }
   },
   "zhipu-coding-personal": {
     "provider": "zhipu-coding-personal",
     "model": "glm-5.2",
-    "thinking": "high",
+    "thinking": "max",
     "agents": {
       "scout": { "model": "zhipu-coding-personal/glm-4.7", "thinking": "low" },
       "planner": { "model": "zhipu-coding-personal/glm-5.2", "thinking": "medium" },
-      "reviewer": { "model": "zhipu-coding-personal/glm-5.2", "thinking": "high" },
-      "worker": { "model": "zhipu-coding-personal/glm-5.2", "thinking": "high" }
+      "reviewer": { "model": "zhipu-coding-personal/glm-5.2", "thinking": "max" },
+      "worker": { "model": "zhipu-coding-personal/glm-5.2", "thinking": "max" }
     }
   },
   "zhipu-coding-company": {
     "provider": "zhipu-coding-company",
     "model": "glm-5.2",
-    "thinking": "high",
+    "thinking": "max",
     "agents": {
       "scout": { "model": "zhipu-coding-company/glm-4.7", "thinking": "low" },
       "planner": { "model": "zhipu-coding-company/glm-5.2", "thinking": "medium" },
-      "reviewer": { "model": "zhipu-coding-company/glm-5.2", "thinking": "high" },
-      "worker": { "model": "zhipu-coding-company/glm-5.2", "thinking": "high" }
+      "reviewer": { "model": "zhipu-coding-company/glm-5.2", "thinking": "max" },
+      "worker": { "model": "zhipu-coding-company/glm-5.2", "thinking": "max" }
     }
   }
 }
