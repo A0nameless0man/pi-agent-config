@@ -1,7 +1,6 @@
 {
   "defaultProvider": "deepseek",
   "defaultModel": "deepseek-v4-pro",
-  "shellPath": "C:\\Program Files\\Git\\bin\\bash.exe",
   "lastChangelogVersion": "0.84.1",
   "theme": "dark",
   "defaultThinkingLevel": "high",
