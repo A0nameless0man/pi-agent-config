@@ -223,7 +223,7 @@ pi -p --no-session "..."      # 临时运行，不保存会话
 
 ### 执行 Shell:Git Bash
 
--   pi 通过内置 bash 工具执行命令,shell 为 **Git Bash**(`settings.json` 中 `shellPath = C:\Program Files\Git\bin\bash.exe`)
+-   pi 通过内置 bash 工具执行命令,shell 为 **Git Bash**。pi 自动检测 bash(按序:settings.json `shellPath` → 默认 Git Bash 路径 `C:\Program Files\Git\bin\bash.exe` → PATH 上的 `bash.exe`),**无需在 settings.json 显式配置 shellPath**(显式配置的 Windows 路径会随 git 同步到 Linux 主机,导致该机器 bash 工具指向不存在的路径而失效)
 -   支持 `&&` 链式执行:`cd /foo/bar && pytest tests`
 -   **禁止**在命令中使用 PowerShell 语法(`if ($?)`、`Set-Location` 等)
 
