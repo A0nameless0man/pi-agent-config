@@ -18,7 +18,17 @@
 | toolCall 配对保护 | 压缩范围边界自动调整,不拆散 assistant(toolCall)↔ toolResult 对 |
 | `decompress` 工具 | 停用块 → 消息重现 |
 | 状态持久化 | `pi.appendEntry("acp-state", ...)`,跨进程 session_start 恢复 |
-| 用量告知(简化) | 用量每增长 15% 告知现状,**不催促**,模型自行决定是否调 compress |
+| 用量提示（自然边界触发） | 控制带 180K~250K；`agent_settled`（随用户下一条消息触发）/ todo 完成 / 硬限兕底（≥8 turn 间隔）；`context` 瞬态注入，不落盘、不堆积 |
+
+### 用量提示机制（区别于上游的频繁 nudge）
+
+上游默认 15% 起步、55% 上限持续催压；本移植版按用户偏好改为**只在自然边界提示**：
+
+- **软限 250K**（`ACP_SOFT_LIMIT_TOKENS`，小窗口按 25% 比例收敛）：超过后仅在 agent 一轮完全结束（`agent_settled`，用户不再回应则永不提示）或 todo 工具完成时标记，随下一 turn 瞬态注入
+- **目标 180K**（`ACP_TARGET_TOKENS`）：提示文案中让模型压向该值
+- **硬限 320K**（`ACP_HARD_LIMIT_TOKENS`）：长自治 run（永不 settled）的兕底，每 ≥8 turn 最多提示一次
+- **频控**：提示后未压缩，需用量再涨 10% 才允许重复；compress 成功即重置基线
+- 全部阈值可用 `ACP_TARGET_TOKENS` / `ACP_SOFT_LIMIT_TOKENS` / `ACP_HARD_LIMIT_TOKENS` 环境变量覆盖；`ACP_DEBUG=1` 可在 stderr 观察注入
 
 ## 用法
 
@@ -26,7 +36,7 @@
 
 ## MVP 范围(已完成并验证)
 
-✅ compress / decompress 工具 · ✅ prune · ✅ mNNNNN 标签 · ✅ 配对保护 · ✅ 持久化与恢复 · ✅ 简化用量告知
+✅ compress / decompress 工具 · ✅ prune · ✅ mNNNNN 标签 · ✅ 配对保护 · ✅ 持久化与恢复 · ✅ 自然边界用量提示
 
 ## 二期遗留(非核心闭环,按需补)
 

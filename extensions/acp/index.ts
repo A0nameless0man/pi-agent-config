@@ -12,7 +12,8 @@
  *   ✅ mNNNNN 消息标识注入 + 边界解析
  *   ✅ toolCall/toolResult 配对完整性保护
  *   ✅ 状态持久化(pi.appendEntry,branching 友好)
- *   ✅ 用量告知(每增长 15% 告知现状,不催促 —— 用户偏好)
+ *   ✅ 用量提示:自然边界触发(agent 一轮结束 / todo 完成 / 硬限兜底),
+ *      目标控制带 180K~250K(用户偏好),瞬态注入不污染 session —— 用户偏好)
  *   ✅ decompress 工具(停用块→消息重现)
  *   ⏳ 二期:GC old-gen 合并、质量门控、KEEP/REF 标记、tier 2/3 蒸馏
  *
@@ -28,8 +29,25 @@ const REF_WIDTH = 5;
 const ID_TAG_OPEN = `<acp-id>`;
 const ID_TAG_CLOSE = `</acp-id>`;
 const REF_RE = /^m(\d{1,5})$/;
-const USAGE_TYPE = "acp-usage"; // before_agent_start 注入的用量消息 customType
-const USAGE_GROWTH_THRESHOLD = 0.15; // 用量每增长 15% 告知一次
+
+// ---- 用量提示(自然边界触发,用户偏好:控制带 180K~250K,不要频繁 nudge)----
+// 软限:超过后在自然边界(agent 一轮结束/todo 完成)提示;目标:提示里让模型压到这儿
+// 硬限:长自治 run 不结束,靠 turn 级兜底强制提示(最小间隔 FORCED_NUDGE_TURN_GAP)
+// 小窗口模型按比例收敛:min(绝对值, ratio × window)
+const TARGET_TOKENS = envInt("ACP_TARGET_TOKENS", 180_000);
+const SOFT_LIMIT_TOKENS = envInt("ACP_SOFT_LIMIT_TOKENS", 250_000);
+const HARD_LIMIT_TOKENS = envInt("ACP_HARD_LIMIT_TOKENS", 320_000);
+const TARGET_RATIO = 0.18;
+const SOFT_LIMIT_RATIO = 0.25;
+const HARD_LIMIT_RATIO = 0.32;
+const FORCED_NUDGE_TURN_GAP = 8; // 硬限强制提示的最小 turn 间隔
+const REPEAT_GROWTH_RATIO = 0.1; // 提示后未压缩:用量再涨 10% 才允许同边界重复提示
+
+function envInt(name: string, dflt: number): number {
+	const v = process.env[name];
+	if (v && /^\d+$/.test(v)) return parseInt(v, 10);
+	return dflt;
+}
 const PROTECT_RECENT_N = 3; // 保护最近 N 条消息不被压缩
 
 // ============ 类型 ============
@@ -64,10 +82,19 @@ interface PruneMessagesState {
 	nextRunId: number;
 }
 
+interface NudgeState {
+	pending: boolean; // 自然边界已到、待注入提示
+	reason: "run-settled" | "todo-completed" | "forced-high-usage" | "";
+	markedAtUsage: number; // 标记 pending 时的用量(注入时复核,防陈旧标记)
+	lastNudgeUsage: number; // 上次实际注入提示时的用量(频控基线,compress 成功后重置)
+	turnCounter: number; // 会话累计 turn 数(硬限间隔控制)
+	lastNudgeTurn: number; // 上次注入提示时的 turnCounter
+}
+
 interface SessionState {
 	sessionId: string | null;
 	prune: PruneMessagesState;
-	lastUsageTokens: number; // 上次告知用量时的 token 数
+	nudge: NudgeState;
 	modelContextLimit?: number;
 }
 
@@ -85,7 +112,7 @@ function freshState(sessionId: string | null): SessionState {
 			nextBlockId: 1,
 			nextRunId: 1,
 		},
-		lastUsageTokens: 0,
+		nudge: { pending: false, reason: "", markedAtUsage: 0, lastNudgeUsage: 0, turnCounter: 0, lastNudgeTurn: 0 },
 	};
 }
 
@@ -118,6 +145,7 @@ function loadState(ctx: ExtensionContext): SessionState {
 function reviveState(data: any, sid: string): SessionState {
 	// 容错恢复:只取认识的字段
 	const p = data?.prune ?? {};
+	const n = data?.nudge ?? {};
 	return {
 		sessionId: sid,
 		prune: {
@@ -127,7 +155,14 @@ function reviveState(data: any, sid: string): SessionState {
 			nextBlockId: typeof p.nextBlockId === "number" ? p.nextBlockId : 1,
 			nextRunId: typeof p.nextRunId === "number" ? p.nextRunId : 1,
 		},
-		lastUsageTokens: typeof data?.lastUsageTokens === "number" ? data.lastUsageTokens : 0,
+		nudge: {
+			pending: n.pending === true,
+			reason: ["run-settled", "todo-completed", "forced-high-usage", ""].includes(n.reason) ? n.reason : "",
+			markedAtUsage: typeof n.markedAtUsage === "number" ? n.markedAtUsage : 0,
+			lastNudgeUsage: typeof n.lastNudgeUsage === "number" ? n.lastNudgeUsage : 0,
+			turnCounter: typeof n.turnCounter === "number" ? n.turnCounter : 0,
+			lastNudgeTurn: typeof n.lastNudgeTurn === "number" ? n.lastNudgeTurn : 0,
+		},
 		modelContextLimit: data?.modelContextLimit,
 	};
 }
@@ -137,7 +172,7 @@ function saveState(state: SessionState, pi: ExtensionAPI): void {
 	if (!state.sessionId) return;
 	const data = {
 		prune: state.prune,
-		lastUsageTokens: state.lastUsageTokens,
+		nudge: state.nudge,
 		modelContextLimit: state.modelContextLimit,
 	};
 	try {
@@ -280,6 +315,35 @@ function adjustForToolPairs(entries: any[], startIdx: number, endIdx: number): {
 	return { start, end };
 }
 
+// ============ 用量提示:阈值计算与文案 ============
+interface AcpLimits {
+	soft: number;
+	target: number;
+	hard: number;
+	window: number;
+}
+
+/** 计算当前会话的提示阈值:绝对值优先,小窗口按比例收敛 */
+function computeLimits(window: number): AcpLimits {
+	return {
+		window,
+		soft: Math.min(SOFT_LIMIT_TOKENS, Math.round(window * SOFT_LIMIT_RATIO)),
+		target: Math.min(TARGET_TOKENS, Math.round(window * TARGET_RATIO)),
+		hard: Math.min(HARD_LIMIT_TOKENS, Math.round(window * HARD_LIMIT_RATIO)),
+	};
+}
+
+function nudgeText(tokens: number, limits: AcpLimits): string {
+	const need = Math.max(0, tokens - limits.target);
+	return (
+		`[acp] Context check-in: ${tokens.toLocaleString()} tokens (${((tokens / limits.window) * 100).toFixed(1)}% of ${limits.window.toLocaleString()}). ` +
+		`Usage is above the ~${limits.soft.toLocaleString()} working band. When current work reaches a stopping point, ` +
+		`use \`compress\` (mNNNNN refs from <acp-id> tags as startId/endId) to summarize completed ranges ` +
+		`and free ~${need.toLocaleString()} tokens, bringing usage toward ~${limits.target.toLocaleString()}. ` +
+		`If everything is genuinely still in active use, continue and compress later.`
+	);
+}
+
 // ============ 扩展主体 ============
 export default function acpExtension(pi: ExtensionAPI): void {
 	// ---- session_start: 预加载状态到缓存 ----
@@ -300,30 +364,52 @@ export default function acpExtension(pi: ExtensionAPI): void {
 		}
 	});
 
-	// ---- before_agent_start: 用量告知(每增长 15% 告知,不催促)----
-	pi.on("before_agent_start", async (_event, ctx) => {
-		const state = loadState(ctx);
+	// ---- 用量提示:自然边界标记(用户偏好:不要频繁 nudge,只在收尾点提示)----
+	// 三个边界:agent 一轮对话完全结束 / todo 工具调用完成 / 硬限兕底(长自治 run 不会 settled)。
+	// 标记 pending → 下一个 turn 的 context 事件里瞬态注入提示(不写入 session,不堆积)。
+	const markIfOverSoft = (state: SessionState, ctx: ExtensionContext, reason: NudgeState["reason"]): void => {
 		const usage = ctx.getContextUsage();
-		if (!usage || !usage.contextWindow || usage.contextWindow <= 0) return;
-		const tokens = usage.tokens ?? 0;
-		const window = usage.contextWindow;
-		state.modelContextLimit = window;
-		const pct = tokens / window;
-		const growth = tokens - state.lastUsageTokens;
-		// 首次超 35%,或之后每增长 15%,告知一次
-		const shouldInform =
-			(state.lastUsageTokens === 0 && pct >= 0.35) ||
-			(state.lastUsageTokens > 0 && growth >= window * USAGE_GROWTH_THRESHOLD);
-		if (!shouldInform) return;
-		state.lastUsageTokens = tokens;
+		const window = usage?.contextWindow ?? state.modelContextLimit ?? 0;
+		if (!window || window <= 0) return;
+		const tokens = usage?.tokens ?? 0;
+		if (tokens <= 0) return;
+		const limits = computeLimits(window);
+		if (tokens < limits.soft) return;
+		// 频控:提示过但模型未压缩,需用量再涨 REPEAT_GROWTH_RATIO 才重复提示(compress 成功会清零基线)
+		if (state.nudge.lastNudgeUsage > 0 && tokens - state.nudge.lastNudgeUsage < window * REPEAT_GROWTH_RATIO) return;
+		state.nudge.pending = true;
+		state.nudge.reason = reason;
+		state.nudge.markedAtUsage = tokens;
 		saveState(state, pi);
-		const line =
-			`[acp] Context usage: ${tokens.toLocaleString()} tokens (${(pct * 100).toFixed(0)}% of ${window.toLocaleString()}). ` +
-			`A \`compress\` tool is available to summarize concluded conversation ranges into compact summaries ` +
-			`(use the mNNNNN refs in <acp-id> tags as startId/endId). Use it when context grows tight.`;
-		return {
-			message: { customType: USAGE_TYPE, content: line, display: false },
-		};
+	};
+
+	pi.on("agent_settled", async (_event, ctx) => {
+		// 模型结束一轮对话停下等用户:最自然的提示点
+		markIfOverSoft(loadState(ctx), ctx, "run-settled");
+	});
+
+	pi.on("tool_execution_end", async (event, ctx) => {
+		// todo 完成是阶段性收尾点,此时压缩心智负担最小
+		if (event.toolName !== "todo") return;
+		markIfOverSoft(loadState(ctx), ctx, "todo-completed");
+	});
+
+	pi.on("turn_end", async (_event, ctx) => {
+		const state = loadState(ctx);
+		state.nudge.turnCounter++;
+		// 硬限兕底:长自治 run(不 settled、无 todo)超硬限时强制标记,间隔 FORCED_NUDGE_TURN_GAP 防骚扰
+		const usage = ctx.getContextUsage();
+		const window = usage?.contextWindow ?? state.modelContextLimit ?? 0;
+		if (window > 0 && (usage?.tokens ?? 0) >= Math.min(HARD_LIMIT_TOKENS, Math.round(window * HARD_LIMIT_RATIO))) {
+			if (state.nudge.turnCounter - state.nudge.lastNudgeTurn >= FORCED_NUDGE_TURN_GAP) {
+				state.nudge.pending = true;
+				state.nudge.reason = "forced-high-usage";
+				state.nudge.markedAtUsage = usage?.tokens ?? 0;
+				// 仅状态实际变化时持久化(turnCounter 重启后可能陈旧,但兕底间隔容忍这点偏差,
+				// 避免每 turn 写一条 acp-state entry 膨胀 session 文件)
+				saveState(state, pi);
+			}
+		}
 	});
 
 	// ---- message_end: 清除模型输出里幻觉的 <acp-*> 标签 ----
@@ -371,6 +457,29 @@ export default function acpExtension(pi: ExtensionAPI): void {
 			const ref = entryId ? refByEntryId.get(entryId) : undefined;
 			if (ref) injectIdTag(msg, ref); // 就地改 deep copy,安全;其他 handler 看到的是返回后的数组
 			retained.push(msg);
+		}
+
+		// ---- 消费 pending 提示:瞬态 user 消息,仅本次请求可见,不写入 session、不堆积 ----
+		if (state.nudge.pending) {
+			state.nudge.pending = false;
+			const usage = ctx.getContextUsage();
+			const window = usage?.contextWindow ?? state.modelContextLimit ?? 0;
+			const tokens = usage?.tokens ?? 0;
+			if (window > 0) state.modelContextLimit = window;
+			const limits = window > 0 ? computeLimits(window) : null;
+			// 复核:标记时的超限仍成立才注入(模型可能已自行压缩过)
+			if (limits && tokens >= limits.soft && state.nudge.markedAtUsage > 0) {
+				retained.push({
+					role: "user",
+					content: [{ type: "text", text: nudgeText(tokens, limits) }],
+				} as any);
+				state.nudge.lastNudgeUsage = tokens;
+				state.nudge.lastNudgeTurn = state.nudge.turnCounter;
+				if (process.env.ACP_DEBUG) {
+					console.error(`[acp] injected nudge (reason=${state.nudge.reason}) at ${tokens} tokens, soft=${limits.soft}`);
+				}
+			}
+			saveState(state, pi);
 		}
 		return { messages: retained };
 	});
@@ -507,6 +616,13 @@ export default function acpExtension(pi: ExtensionAPI): void {
 						`(~${Math.round(rangeTokens)} tokens) → summary ${summaryTokens} tokens` +
 						(item.topic ? ` [${item.topic}]` : ""),
 				);
+			}
+
+			// 压缩成功:重置提示频控基线,下次自然边界超限可再次提示
+			if (results.some((r) => r.startsWith("✓"))) {
+				state.nudge.lastNudgeUsage = 0;
+				state.nudge.pending = false;
+				state.nudge.reason = "";
 			}
 
 			saveState(state, pi);
