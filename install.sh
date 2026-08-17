@@ -29,6 +29,8 @@ warn() { printf '\033[1;33m[install]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[install]\033[0m %s\n' "$*" >&2; exit 1; }
 
 # ---------- 解析参数 ----------
+# 先保存原始参数:curl|bash 引导路径 exec 时需要原样转交(解析循环会 shift 掉)
+ORIG_ARGS=("$@")
 PROFILE="" KEY="" OV_ENDPOINT="" OV_KEY="" NO_TEST=0 NO_PULL=0
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -63,7 +65,7 @@ else
       fi
     fi
   fi
-  exec bash "$AGENT_DIR/install.sh" "$@"
+  exec bash "$AGENT_DIR/install.sh" "${ORIG_ARGS[@]}"
 fi
 
 # ---------- preflight ----------
