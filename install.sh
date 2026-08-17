@@ -20,7 +20,9 @@
 # 本机已有的其他条目(如内网自建 provider、其他 profile 的 key)。
 set -euo pipefail
 
-REPO_URL="https://github.com/A0nameless0man/pi-agent-config.git"
+# 可用环境变量覆盖克隆源(镜像/测试用);默认 GitHub HTTPS
+REPO_URL="${PI_AGENT_REPO_URL:-https://github.com/A0nameless0man/pi-agent-config.git}"
+REPO_URL_SSH="git@github.com:A0nameless0man/pi-agent-config.git"
 
 say()  { printf '\033[1;32m[install]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[install]\033[0m %s\n' "$*" >&2; }
@@ -50,7 +52,16 @@ else
   command -v git >/dev/null 2>&1 || die "缺少 git,请先安装 Git"
   if [ ! -d "$AGENT_DIR/.git" ]; then
     say "克隆配置仓库 → $AGENT_DIR"
-    git clone "$REPO_URL" "$AGENT_DIR"
+    # 国内网络对 github:443 常有间歇性阻断;默认源失败时退试 SSH(需已配 key)
+    if ! git clone "$REPO_URL" "$AGENT_DIR"; then
+      if [ -z "${PI_AGENT_REPO_URL:-}" ]; then
+        warn "HTTPS 克隆失败(网络阻断?),尝试 SSH…"
+        git clone "$REPO_URL_SSH" "$AGENT_DIR" \
+          || die "克隆失败;可重试,或用 PI_AGENT_REPO_URL 指定镜像源"
+      else
+        die "克隆失败(PI_AGENT_REPO_URL 指定源不可达)"
+      fi
+    fi
   fi
   exec bash "$AGENT_DIR/install.sh" "$@"
 fi
