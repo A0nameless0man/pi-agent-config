@@ -11,21 +11,48 @@
 
 ## 安装
 
-克隆到本地后，将仓库内容放入 `~/.pi/agent/`（全局配置）或项目的
-`.pi/agent/` 目录。
+### 全新机器一行冷启动
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/A0nameless0man/pi-agent-config/main/install.sh \
+  | bash -s -- <profile> --key <API-KEY>
+```
+
+脚本自动完成:检查 git/Node≥20 → 克隆本仓库到 `~/.pi/agent` → 安装 pi
+(npm 全局,Linux 无权限时自动 sudo)→ 生成 `auth.json`(按 provider 合并)
+→ 从 `models.json.example` 生成 `models.json`(保留本机额外 provider)→
+`switch-model.sh <profile>` 生成派生文件 → 可选配置 openviking → 冒烟测试。
+
+profile 取值: `deepseek` / `zhipu` / `zhipu-coding-personal` / `zhipu-coding-company`
+(见 `model-profiles.json`)。交互环境也可省略参数由菜单引导:
+
+```bash
+git clone https://github.com/A0nameless0man/pi-agent-config.git ~/.pi/agent
+bash ~/.pi/agent/install.sh
+```
+
+幂等:已有机器可重复运行(拉取更新、保留本机已有 key / 内网 provider);
+更多选项见 `bash install.sh --help`。
+
+### 手动安装(不推荐)
+
+克隆到 `~/.pi/agent/` 后手动复制各 `.example` 并填值,再跑
+`bash switch-model.sh <profile>`。
 
 ## 配置密钥
 
-仓库**不含任何真实密钥**。按需复制示例文件并填入真实值：
+仓库**不含任何真实密钥**。`install.sh` 会按需生成以下文件;手动操作则复制
+示例并填入真实值:
 
 ```bash
 cp auth.json.example auth.json
+cp models.json.example models.json
 cp extensions/openviking-memory/openviking-config.example.json \
    extensions/openviking-memory/openviking-config.json
 ```
 
-模型定义同样被排除（`models.json` / `models-store.json`），
-因为其中可能包含内网地址与公司信息。若需共享，请自行脱敏后添加。
+`models.json.example` 仅含 4 个标准 provider(公开 API 地址,无 key);
+内网自建 provider(如 `bjf-local`)不进模板,各机器自行维护。
 
 ## 安全约定
 
