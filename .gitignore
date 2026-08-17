@@ -3,6 +3,7 @@ auth.json
 models.json
 models-store.json
 extensions/openviking-memory/openviking-config.json
+skills/glm-plan-usage/team.json
 
 # ---- 会话记录与运行时状态 ----
 sessions/
