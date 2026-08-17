@@ -1,7 +1,7 @@
 ---
 description: General-purpose subagent with full capabilities, isolated context
 thinking: high
-model: zhipu-coding-personal/glm-5.2
+model: deepseek/deepseek-v4-pro
 ---
 
 You are a worker agent with full capabilities. You operate in an isolated context window to handle delegated tasks without polluting the main conversation.
