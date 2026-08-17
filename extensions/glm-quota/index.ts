@@ -48,6 +48,7 @@ interface QuotaEntry {
 	usage?: number;
 	currentValue?: number;
 	percentage?: number;
+	nextResetTime?: number;
 }
 interface QuotaData {
 	limits?: QuotaEntry[];
@@ -149,6 +150,18 @@ function fmtCredits(n: number): string {
 	return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
 }
 
+/**
+ * 重置时间展示:5h 窗口只会是几小时内 → 只出 HH:MM;
+ * 周窗口可能是几天后 → 完整 YYYY-MM-DD HH:MM(用户指定格式)。
+ */
+function fmtResetTime(ms: number, short: boolean): string {
+	const d = new Date(ms);
+	const p = (n: number) => String(n).padStart(2, "0");
+	const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+	if (short) return hm;
+	return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`;
+}
+
 function renderStatus(
 	theme: ExtensionContext["ui"]["theme"],
 	isTeam: boolean,
@@ -158,27 +171,37 @@ function renderStatus(
 	const sep = theme.fg("dim", "│");
 	if (!fiveHour && !weekly) return theme.fg("dim", `${isTeam ? "GLM·T" : "GLM"} 无配额数据`);
 
+	// 重置时间用弱色缀在百分比后:5h → HH:MM,周 → YYYY-MM-DD HH:MM
+	const resetHint = (item: QuotaEntry, short: boolean): string => {
+		if (!item.nextResetTime) return "";
+		return theme.fg("dim", ` ${fmtResetTime(item.nextResetTime, short)}`);
+	};
+
 	const parts: string[] = [];
 	if (fiveHour) {
 		if (isTeam && typeof fiveHour.currentValue === "number" && typeof fiveHour.usage === "number") {
 			const pct = fiveHour.percentage ?? 0;
 			parts.push(
-				theme.fg("dim", "5h ") + pctColor(theme, pct)(`${fmtCredits(fiveHour.currentValue)}/${fmtCredits(fiveHour.usage)}`),
+				theme.fg("dim", "5h ") +
+					pctColor(theme, pct)(`${fmtCredits(fiveHour.currentValue)}/${fmtCredits(fiveHour.usage)}`) +
+					resetHint(fiveHour, true),
 			);
 		} else {
 			const pct = fiveHour.percentage ?? 0;
-			parts.push(theme.fg("dim", "5h ") + pctColor(theme, pct)(`${pct}%`));
+			parts.push(theme.fg("dim", "5h ") + pctColor(theme, pct)(`${pct}%`) + resetHint(fiveHour, true));
 		}
 	}
 	if (weekly) {
 		if (isTeam && typeof weekly.currentValue === "number" && typeof weekly.usage === "number") {
 			const pct = weekly.percentage ?? 0;
 			parts.push(
-				theme.fg("dim", "周 ") + pctColor(theme, pct)(`${fmtCredits(weekly.currentValue)}/${fmtCredits(weekly.usage)}`),
+				theme.fg("dim", "周 ") +
+					pctColor(theme, pct)(`${fmtCredits(weekly.currentValue)}/${fmtCredits(weekly.usage)}`) +
+					resetHint(weekly, false),
 			);
 		} else {
 			const pct = weekly.percentage ?? 0;
-			parts.push(theme.fg("dim", "周 ") + pctColor(theme, pct)(`${pct}%`));
+			parts.push(theme.fg("dim", "周 ") + pctColor(theme, pct)(`${pct}%`) + resetHint(weekly, false));
 		}
 	}
 	return label + parts.join(sep);
