@@ -11,5 +11,7 @@
     "npm:@juicesharp/rpiv-ask-user-question",
     "npm:@juicesharp/rpiv-todo",
     "git:github.com/A0nameless0man/pi-goal-list-loop-audit@fix/windows-pi-spawn-enoent"
-  ]
+  ],
+  "steeringMode": "all",
+  "followUpMode": "all"
 }
