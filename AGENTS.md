@@ -74,13 +74,11 @@ pi 核心工具仅包含 read / write / edit / bash,**没有 `task` 工具**。�
 -   **上下文传递**:`Agent` 的 prompt 即任务交接文档,必须包含下方 目标 / 工作环境 / 约束条件 / 参考信息 四要素
 -   **管理命令**:`/agents` 交互菜单(查看运行中 agent、创建/编辑自定义 agent、调整并发/嵌套深度等)
 
-**角色模型分工**(由 `model-profiles.json` 定义,`bash ~/.pi/agent/switch-model.sh <profile>` 切换):
+**角色模型分工**(由 `model-profiles.json` 定义,`bash ~/.pi/agent/switch-model.sh <profile>` 切换,当前会话立刻换用 `/model`):
 -   `scout` — profile 快速档(flash)+ low thinking
 -   `planner` / `reviewer` / `worker` — profile 主力档(pro),thinking medium / high / high
 -   `Explore` — 由 glla 管理、继承父模型,不在 profile 里
--   每个角色在 profile 里同时配 model 与 thinking;切换批量改写 settings.json 默认模型/thinking + `agents/*.md` 各角色的 `model:`/`thinking:` 行
--   profile:deepseek / zhipu / zhipu-coding-personal / zhipu-coding-company;当前会话立刻换用 `/model`
--   **profile 派生文件不进 git**:git 只跟踪 `.example` 模板(`settings.json.example`、`agents/<role>.md.example`),实际文件由 switch-model 脚本从模板+profile 生成,gitignored——各机器可持有不同 provider(irail=公司 plan,Windows=个人 plan)。改共享配置改 `.example`,各机器 `git pull && switch-model.sh refresh` 同步;新机器 clone 后先跑 `switch-model.sh <profile>` 引导
+-   profile 派生文件(settings.json / agents/<role>.md)不进 git,由模板生成;**改共享配置改 `.example`**,多机同步/冷启动/key 分发见 `pi-config-dev` skill
 
 ## 任务交接示例
 
