@@ -22,7 +22,9 @@
 
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
+import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
+import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 const BOCHA_API_BASE = "https://api.bochaai.com/v1";
@@ -235,6 +237,104 @@ function renderWebSearch(body: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// TUI rendering — bash-style collapsed result. Mirrors the built-in bash tool:
+// collapsed view shows the tail N visual lines plus a "... (N earlier lines,
+// ctrl+o to expand)" hint, expanded view (ctrl+o on the tool row) shows the
+// full output, and a "Took X.Xs" footer records request duration. The LLM
+// always receives the full markdown; this only changes what humans see.
+// ---------------------------------------------------------------------------
+
+const PREVIEW_LINES = 5;
+const ELAPSED_UPDATE_MS = 1000;
+
+/** Row-local state shared between renderCall and renderResult (context.state). */
+interface RenderState {
+	startedAt?: number;
+	endedAt?: number;
+	interval?: ReturnType<typeof setInterval>;
+}
+
+/** Width-keyed preview cache, cleared on invalidate (resize/theme change). */
+interface PreviewCache {
+	cachedWidth?: number;
+	cachedLines?: string[];
+	cachedSkipped?: number;
+}
+
+class BochaResultRenderComponent extends Container {
+	public readonly cache: PreviewCache = {};
+}
+
+function formatDuration(ms: number): string {
+	return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** Pull the plain-text body out of an AgentToolResult (all text parts joined). */
+function resultText(result: AgentToolResult): string {
+	return result.content
+		.map((part) => (part.type === "text" ? part.text : ""))
+		.filter(Boolean)
+		.join("\n")
+		.trim();
+}
+
+function rebuildResultComponent(
+	component: BochaResultRenderComponent,
+	result: AgentToolResult,
+	options: ToolRenderResultOptions,
+	theme: Theme,
+	state: RenderState,
+): void {
+	const cache = component.cache;
+	component.clear();
+
+	const output = resultText(result);
+	if (output) {
+		const color = result.isError ? "error" : "toolOutput";
+		const styled = output
+			.split("\n")
+			.map((line) => theme.fg(color, line))
+			.join("\n");
+		if (options.expanded) {
+			component.addChild(new Text(`\n${styled}`, 0, 0));
+		} else {
+			// Anonymous component so the width-dependent preview is recomputed
+			// lazily per render and invalidated on resize, exactly like bash.
+			component.addChild({
+				render: (width: number): string[] => {
+					if (cache.cachedLines === undefined || cache.cachedWidth !== width) {
+						const preview = truncateToVisualLines(styled, PREVIEW_LINES, width);
+						cache.cachedLines = preview.visualLines;
+						cache.cachedSkipped = preview.skippedCount;
+						cache.cachedWidth = width;
+					}
+					if (cache.cachedSkipped && cache.cachedSkipped > 0) {
+						const hint =
+							theme.fg("muted", `... (${cache.cachedSkipped} earlier lines,)`) +
+							` ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+						return ["", hint, ...(cache.cachedLines ?? [])];
+					}
+					return ["", ...(cache.cachedLines ?? [])];
+				},
+				invalidate: () => {
+					cache.cachedWidth = undefined;
+					cache.cachedLines = undefined;
+					cache.cachedSkipped = undefined;
+				},
+			});
+		}
+	}
+
+	if (state.startedAt !== undefined) {
+		const label = options.isPartial ? "Elapsed" : "Took";
+		const endTime = state.endedAt ?? Date.now();
+		component.addChild(
+			new Text(`\n${theme.fg("muted", `${label} ${formatDuration(endTime - state.startedAt)}`)}`, 0, 0),
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Extension entry point
 // ---------------------------------------------------------------------------
 
@@ -247,6 +347,43 @@ export default function (pi: ExtensionAPI) {
 		parameters: WebSearchParams,
 		async execute(_toolCallId, params, signal) {
 			return executeSearch(params, signal);
+		},
+		renderCall(args, theme, context) {
+			const state = ((context.state ??= {}) as RenderState);
+			if (context.executionStarted && state.startedAt === undefined) {
+				state.startedAt = Date.now();
+				state.endedAt = undefined;
+			}
+			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			const head = theme.fg("toolTitle", theme.bold("⌕ bocha"));
+			const query = typeof args?.query === "string" ? args.query : "";
+			const queryDisplay = query ? ` ${theme.fg("toolOutput", `"${query}"`)}` : "";
+			const meta = [args?.freshness, args?.count ? `${args.count} results` : undefined]
+				.filter(Boolean)
+				.join(" · ");
+			const metaDisplay = meta ? ` ${theme.fg("muted", `(${meta})`)}` : "";
+			text.setText(head + queryDisplay + metaDisplay);
+			return text;
+		},
+		renderResult(result, options, theme, context) {
+			const state = ((context.state ??= {}) as RenderState);
+			// While a partial result streams, refresh once per second so the
+			// "Elapsed" footer ticks like bash does.
+			if (state.startedAt !== undefined && options.isPartial && !state.interval) {
+				state.interval = setInterval(() => context.invalidate(), ELAPSED_UPDATE_MS);
+			}
+			if (!options.isPartial || context.isError) {
+				state.endedAt ??= Date.now();
+				if (state.interval) {
+					clearInterval(state.interval);
+					state.interval = undefined;
+				}
+			}
+			const component =
+				(context.lastComponent as BochaResultRenderComponent | undefined) ?? new BochaResultRenderComponent();
+			rebuildResultComponent(component, result, options, theme, state);
+			component.invalidate();
+			return component;
 		},
 	});
 }
