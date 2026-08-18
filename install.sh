@@ -96,6 +96,24 @@ else
   fi
 fi
 
+# ---------- 安装 codegraph CLI(extensions/codegraph 桥的运行时依赖) ----------
+# 桥在调用时才解析二进制,缺失只会报友好错误;这里装上则开箱即用。
+# 幂等:已安装则跳过。失败不阻塞安装(非核心依赖)。
+if command -v codegraph >/dev/null 2>&1; then
+  say "codegraph 已安装: $(codegraph --version 2>/dev/null || echo '?')"
+else
+  say "安装 codegraph(npm 全局)…"
+  CG_OK=0
+  if npm install -g @colbymchenry/codegraph; then CG_OK=1
+  elif [ "$IS_WIN" = 0 ] && command -v sudo >/dev/null 2>&1 && sudo npm install -g @colbymchenry/codegraph; then CG_OK=1
+  fi
+  if [ "$CG_OK" = 1 ]; then
+    say "codegraph 安装完成: $(codegraph --version 2>/dev/null || echo '?')"
+  else
+    warn "codegraph 安装失败(非核心依赖,不阻塞);可稍后手动: npm i -g @colbymchenry/codegraph"
+  fi
+fi
+
 # ---------- 选择 profile ----------
 PROFILES="$(node -p 'Object.keys(require("./model-profiles.json")).join(" ")')"
 if [ -z "$PROFILE" ]; then

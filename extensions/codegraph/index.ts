@@ -33,6 +33,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -113,6 +114,11 @@ function npmGlobalDirs(): string[] {
 		dirs.push(normalized);
 	};
 
+	// 用户态自愈安装位(见 resolveServerLaunchWithSelfHeal):npm --prefix 装在这里,
+	// 包结构(<prefix>/node_modules/@colbymchenry/...)与全局扫描路径同构,免 sudo
+	const agentDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+	push(path.join(agentDir, "codegraph-cli"));
+
 	const isWin = process.platform === "win32";
 	const pathEnv = process.env.PATH ?? "";
 	for (const raw of pathEnv.split(isWin ? ";" : ":")) {
@@ -173,6 +179,36 @@ function resolveServerLaunch(): ServerLaunch | null {
 		if (fs.existsSync(shim)) return { command: process.execPath, args: [shim, ...SERVER_ARGS], viaShim: true };
 	}
 	return null;
+}
+
+// ---------------------------------------------------------------------------
+// 自愈安装:解析失败时,用 npm --prefix 装到 agent 目录下的用户态前缀(免 sudo),
+// 然后重扫。每会话只试一次,避免每次工具调用都重复下载。
+// ---------------------------------------------------------------------------
+
+let selfHealAttempted = false;
+
+function resolveServerLaunchWithSelfHeal(): ServerLaunch | null {
+	let launch = resolveServerLaunch();
+	if (launch || selfHealAttempted) return launch;
+	selfHealAttempted = true;
+
+	const agentDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+	const prefix = path.join(agentDir, "codegraph-cli");
+	// Windows 上 spawn("npm") 命中 .cmd 的 EINVAL 硬化,需 shell;Linux 直接跑
+	const result = spawnSync(
+		"npm",
+		["install", "--prefix", prefix, "--no-fund", "--no-audit", "@colbymchenry/codegraph@latest"],
+		{
+			encoding: "utf8",
+			timeout: 180_000,
+			windowsHide: true,
+			shell: process.platform === "win32",
+		},
+	);
+	if (result.status !== 0) return null;
+	cachedNpmDirs = null; // 重扫,把新装的 prefix 纳入候选
+	return resolveServerLaunch();
 }
 
 // ---------------------------------------------------------------------------
@@ -280,11 +316,12 @@ class McpSession {
 	}
 
 	private connect(): Promise<void> {
-		const launch = resolveServerLaunch();
+		const launch = resolveServerLaunchWithSelfHeal();
 		if (!launch) {
 			return Promise.reject(
 				new Error(
-					"codegraph MCP server not found — install it first: npm i -g @colbymchenry/codegraph" +
+					"codegraph MCP server not found — self-install into ~/.pi/agent/codegraph-cli failed too; " +
+						"install it manually: npm i -g @colbymchenry/codegraph" +
 						" (the bundled platform package or npm-shim.js could not be located in any npm global prefix)",
 				),
 			);
