@@ -18,7 +18,7 @@ git 只跟踪**模板与源码**；实际生效文件是**机器本地派生物�
 | `settings.json.example` | `settings.json`（switch-model 生成） |
 | `agents/{planner,reviewer,scout,worker}.md.example` | `agents/<role>.md`（switch-model 生成） |
 | `models.json.example`（仅公开标准 provider） | `models.json`（可含内网自建 provider） |
-| `skills/`、`extensions/`、`install.sh`、`switch-model.*` | `auth.json`、`extensions/openviking-memory/openviking-config.json`、`skills/glm-plan-usage/team.json` |
+| `skills/`、`extensions/`、`install.sh`、`switch-model.*`（含官方扩展 `extensions/openviking/`，takeover=false 已入库） | `auth.json`、`extensions/openviking-memory/openviking-config.json`、`~/.openviking/ovcli.conf`（官方扩展凭证）、`skills/glm-plan-usage/team.json` |
 
 **核心规则：持久改动必须写 `.example` 模板**。直接编辑实际文件（settings.json、agents/*.md）
 会在下次 switch-model / refresh 时被模板覆盖。
@@ -64,8 +64,8 @@ ssh <host> 'ZKEY=$(sed -n 1p /tmp/.pi-sync-keys); OVK=$(sed -n 2p /tmp/.pi-sync-
 - **settings.json 不配 shellPath**：显式 Windows 路径会随 git 同步到 Linux 导致 bash 工具失效
 - **环境变量类 key**（如 BOCHA_API_KEY）：各机 `~/.bashrc` 追加 export 并 `chmod 600`，
   传输同上节中转模式
-- **gitignored 的本地配置文件**（team.json / openviking-config.json / auth.json）不在
-  install.sh 覆盖范围内，冷启动后需单独分发
+- **gitignored 的本地配置文件**（team.json / openviking-config.json / auth.json）：openviking 相关两个由 install.sh `--ov-endpoint/--ov-key` 直接生成（toolsOnly 形态 + ovcli.conf），其余冷启动后需单独分发
+- **OpenViking 双扩展共存**：官方扩展（`extensions/openviking/`，git 跟踪）负责 recall/捕获/commit，读 `~/.openviking/ovcli.conf`；openviking-memory 走 toolsOnly（仅 memwrite/memimport），读 `openviking-config.json`。旧机器升级后需手动补 `~/.openviking/ovcli.conf`（install.sh 只在冷启动时生成）
 - Windows 无 tmux：pi-sessions 需 `sessions.subagents.enable:false`（本地 settings.json 覆盖，
   不进模板）；Linux 机器全功能
 

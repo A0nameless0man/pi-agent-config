@@ -1,10 +1,19 @@
 {
   "endpoint": "http://<openviking-host>:1933",
+  "toolsOnly": true,
   "autoCommit": {
     "intervalMinutes": 10,
-    "enabled": true
+    "enabled": false
   },
   "apiKey": "<your-api-key>",
   "timeoutMs": 30000,
-  "enabled": true
+  "enabled": true,
+  "autoRecall": {
+    "enabled": false,
+    "limit": 6,
+    "scoreThreshold": 0.15,
+    "maxContentChars": 500,
+    "preferAbstract": true,
+    "tokenBudget": 2000
+  }
 }

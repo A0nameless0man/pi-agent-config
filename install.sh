@@ -194,15 +194,32 @@ if [ -z "$OV_ENDPOINT" ] && [ -t 0 ]; then
   fi
 fi
 if [ -n "$OV_ENDPOINT" ]; then
+  # 双扩展共存：官方扩展(extensions/openviking)读 ~/.openviking/ovcli.conf；
+  # openviking-memory 走 toolsOnly 模式(仅 memwrite/memimport)，捕获/recall/commit 由官方扩展负责
+  mkdir -p "$HOME/.openviking"
   node -e '
     const fs = require("fs");
-    const [endpoint, key, p] = process.argv.slice(1);
-    fs.writeFileSync(p, JSON.stringify({
-      endpoint, apiKey: key, timeoutMs: 30000, enabled: true,
-      autoCommit: { intervalMinutes: 10, enabled: true },
+    const [endpoint, key, confPath, ovcliPath] = process.argv.slice(1);
+    fs.writeFileSync(confPath, JSON.stringify({
+      endpoint,
+      toolsOnly: true,
+      autoCommit: { intervalMinutes: 10, enabled: false },
+      apiKey: key,
+      timeoutMs: 30000,
+      enabled: true,
+      autoRecall: {
+        enabled: false, limit: 6, scoreThreshold: 0.15,
+        maxContentChars: 500, preferAbstract: true, tokenBudget: 2000,
+      },
     }, null, 2) + "\n");
-  ' "$OV_ENDPOINT" "$OV_KEY" "extensions/openviking-memory/openviking-config.json"
-  say "openviking-memory: $OV_ENDPOINT"
+    fs.writeFileSync(ovcliPath, JSON.stringify({
+      url: endpoint, api_key: key,
+    }, null, 2) + "\n");
+  ' "$OV_ENDPOINT" "$OV_KEY" \
+    "extensions/openviking-memory/openviking-config.json" \
+    "$HOME/.openviking/ovcli.conf"
+  chmod 600 "$HOME/.openviking/ovcli.conf" 2>/dev/null || true
+  say "openviking: $OV_ENDPOINT (官方扩展 ovcli.conf + openviking-memory toolsOnly)"
 fi
 
 # ---------- 冒烟测试 ----------
