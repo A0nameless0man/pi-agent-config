@@ -500,11 +500,14 @@ Co-Authored-By: DeepSeek-V4 (deepseek/deepseek-v4) <noreply+deepseek-v4@deepseek
 
 ---
 
-## OpenViking Memory 扩展
+## OpenViking Memory 扩展（双扩展共存）
 
-跨会话的长期记忆系统。OpenViking 通过语义索引将用户偏好、历史决策、外部文档等持久化存储，解决 LLM 无状态的问题。
+跨会话的长期记忆系统。OpenViking 通过语义索引将用户偏好、历史决策、外部文档等持久化存储，解决 LLM 无状态的问题。记忆服务为内网共享 endpoint（见 openviking 记忆 `viking://user/hugua/memories/entities/irail_pi_deployment.md`），api_key 认证。
 
-在 pi 中作为扩展提供：`~/.pi/agent/extensions/openviking-memory/`，记忆服务仍位于 `localhost:1933`。
+两个扩展分工共存，**避免双重捕获**：
+
+- **官方扩展** `~/.pi/agent/extensions/openviking/`（来自 volcengine/OpenViking upstream）——负责自动 recall（每轮 prompt 同步检索注入）、turn 捕获、commit、viking:// URI guard。takeover 已关闭（跨会话上下文由 acp 扩展负责）。凭证读 `~/.openviking/ovcli.conf`（不进 git，多机需单独分发）
+- **自维护扩展** `~/.pi/agent/extensions/openviking-memory/`（toolsOnly 模式，`openviking-config.json` 中 `"toolsOnly": true`）——只注册 memwrite/memimport 两个工具，不做捕获/recall/commit
 
 ### 知识结构
 
@@ -512,12 +515,21 @@ Co-Authored-By: DeepSeek-V4 (deepseek/deepseek-v4) <noreply+deepseek-v4@deepseek
 
 ### 工具使用
 
-- **memsearch** — 查询记忆。需要回忆用户偏好、历史决策、项目背景时优先使用
-- **memread** — 读取指定 URI 的完整内容（abstract/overview/read 三级加载）
-- **membrowse** — 浏览目录结构，列出子条目
-- **memcommit** — 提交当前会话，自动提取用户偏好、实体、事件等。重要对话结束时主动调用
-- **memwrite** — 手动写入/追加/创建内容到指定 URI（replace/append/create），用于记录特定知识或修正记忆
-- **memimport** — 从 URL 导入外部资源（文档/规范/API 文档），支持增量更新
+读侧（官方扩展注册）：
+
+- **viking_search** — 语义检索记忆/资源/skills，需要回忆用户偏好、历史决策、项目背景时优先使用
+- **viking_read** — 读取指定 URI（abstract/overview/read 分级加载）
+- **viking_browse** — 浏览目录结构，列出子条目
+- **viking_remember** — 存一条事实到当前会话，commit 时自动抽取
+- **viking_forget** — 按 URI 或检索删除记忆
+- **viking_add_resource** — 从 URL 导入外部资源，自动解析索引
+- **viking_archive_expand** — 展开归档会话查看原始对话
+- **`/viking`** 命令 — 状态查看；`/viking commit` 手动提交
+
+写侧（openviking-memory 扩展注册，官方扩展没有的能力）：
+
+- **memwrite** — 手动写入/追加/创建内容到指定 URI（replace/append/create），可指定精确路径，用于记录特定知识或修正记忆
+- **memimport** — 导入本地文件/目录（zip）/URL 到知识库，支持增量更新
 
 ---
 

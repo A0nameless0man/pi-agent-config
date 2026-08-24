@@ -306,6 +306,14 @@ interface OpenVikingConfig {
   endpoint: string
   apiKey: string
   enabled: boolean
+  /**
+   * Tools-only mode: register just memwrite/memimport, skip all capture /
+   * recall / commit / session lifecycle. Used when coexisting with the
+   * official `openviking` extension (extensions/openviking), which owns
+   * recall, turn capture and commits — running both in full mode would
+   * double-capture every conversation into two OpenViking sessions.
+   */
+  toolsOnly?: boolean
   timeoutMs: number
   autoCommit?: {
     enabled: boolean
@@ -1740,6 +1748,9 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
   initLogger()
   initSessionMapPath()
 
+  // toolsOnly 见 OpenVikingConfig.toolsOnly —— 与官方 openviking 扩展共存模式。
+  const toolsOnly = config.toolsOnly === true
+
   if (!config.enabled) {
     console.log("OpenViking Memory Extension is disabled in configuration")
     return
@@ -1747,8 +1758,10 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
 
   log("INFO", "extension", "OpenViking Memory Extension initialized", { endpoint: config.endpoint })
 
-  // Load session map from disk
-  await loadSessionMap()
+  // Load session map from disk (toolsOnly 模式无 session，跳过)
+  if (!toolsOnly) {
+    await loadSessionMap()
+  }
 
   const healthy = await checkServiceHealth(config)
   log("INFO", "health", healthy ? "OpenViking health check passed" : "OpenViking health check failed", {
@@ -1766,6 +1779,8 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
   // ──────────────────────────────────────────────────────────────────────
 
   pi.on("session_start", async (_event, ctx) => {
+    if (toolsOnly) return
+
     startAutoCommit(config) // idempotent
 
     const sessionId = ctx.sessionManager.getSessionId()
@@ -1841,6 +1856,8 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
   })
 
   pi.on("session_shutdown", async (event, ctx) => {
+    if (toolsOnly) return
+
     // pi tears down the extension runtime on quit, reload, and session
     // replacement. Mirrors the source plugin's session.deleted + stop logic.
     stopAutoCommit()
@@ -1896,6 +1913,8 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
   // ──────────────────────────────────────────────────────────────────────
 
   pi.on("message_start", async (event, ctx) => {
+    if (toolsOnly) return
+
     const message = event.message
     if (message.role !== "user" && message.role !== "assistant") return
 
@@ -1923,6 +1942,8 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
   // a crash mid-stream still leaves the partial content pending (mirrors the
   // source's message.part.updated streaming capture).
   pi.on("message_update", async (event, ctx) => {
+    if (toolsOnly) return
+
     const message = event.message
     if (message.role !== "assistant") return
 
@@ -1949,6 +1970,8 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
   })
 
   pi.on("message_end", async (event, ctx) => {
+    if (toolsOnly) return
+
     const message = event.message
     if (message.role !== "user" && message.role !== "assistant") return
 
@@ -2010,6 +2033,8 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
   const RECALL_IDEMPOTENCY_MS = 60_000
 
   pi.on("before_agent_start", async (event) => {
+    if (toolsOnly) return
+
     try {
       if (!config.autoRecall?.enabled) return
 
@@ -2051,6 +2076,9 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
   // ──────────────────────────────────────────────────────────────────────
 
   pi.on("tool_call", async (event) => {
+    // toolsOnly 模式下由官方扩展的 uri-guard 接管 viking:// 重定向
+    if (toolsOnly) return
+
     if (event.toolName !== "read" && event.toolName !== "grep" && event.toolName !== "find") return
 
     const input = event.input as Record<string, unknown>
@@ -2102,7 +2130,8 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
     return { content: [{ type: "text", text }] } as AgentToolResult
   }
 
-  pi.registerTool({
+  // toolsOnly：只保留 memwrite / memimport（官方扩展提供 viking_read 等读侧工具）
+  if (!toolsOnly) pi.registerTool({
     name: "memread",
     label: "Memory Read",
     description:
@@ -2162,7 +2191,7 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
     },
   })
 
-  pi.registerTool({
+  if (!toolsOnly) pi.registerTool({
     name: "membrowse",
     label: "Memory Browse",
     description:
@@ -2228,7 +2257,7 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
     },
   })
 
-  pi.registerTool({
+  if (!toolsOnly) pi.registerTool({
     name: "memcommit",
     label: "Memory Commit",
     description:
@@ -2375,7 +2404,7 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
     },
   })
 
-  pi.registerTool({
+  if (!toolsOnly) pi.registerTool({
     name: "memsearch",
     label: "Memory Search",
     description:
@@ -2664,6 +2693,9 @@ export default async function openVikingMemoryExtension(pi: ExtensionAPI): Promi
 
   log("INFO", "extension", "OpenViking Memory Extension registered", {
     endpoint: config.endpoint,
-    tools: ["memread", "membrowse", "memcommit", "memsearch", "memwrite", "memimport"],
+    mode: toolsOnly ? "tools-only (memwrite/memimport)" : "full",
+    tools: toolsOnly
+      ? ["memwrite", "memimport"]
+      : ["memread", "membrowse", "memcommit", "memsearch", "memwrite", "memimport"],
   })
 }
