@@ -247,7 +247,7 @@ Git Bash 默认 UTF-8,中文输出通常正常。如遇乱码:
 
 ### Shell 陷阱：后台命令与进程终止
 
-pi 的 bash 工具通过 `bash -c "<cmd>"` 执行命令，存在两个结构性陷阱：
+pi 的 bash 工具通过 `bash -c "<cmd>"` 执行命令，存在结构性陷阱：
 
 #### 陷阱 1：`&` 后台命令导致挂起
 
@@ -306,6 +306,34 @@ pgrep -f "$TARGET" | while read pid; do
     fi
 done
 ```
+
+#### 陷阱 3：长 sleep 等待初始化/下载（“死了还不知道”）
+
+**根因**：用单个很长的 `sleep 60` / `sleep 300` 等待服务初始化、下载、构建完成。等待期间任务可能早已失败退出，长 sleep 让你白等到超时才发现，浪费整段时间。
+
+**禁止**：
+```bash
+# 不要用长 sleep 盲等
+sleep 120 && curl localhost:8080/health
+```
+
+**必须**用短间隔轮询循环——每 2-5 秒检查一次状态，满足条件立即退出；检查点里同时验证任务是否还活着：
+```bash
+# 等服务就绪：最多 ~60s，就绪立即退出
+for i in $(seq 1 30); do
+  curl -s -o /dev/null localhost:8080/health && { echo READY; break; }
+  sleep 2
+done
+
+# 等后台进程：文件产出 + 进程存活双重检查
+for i in $(seq 1 60); do
+  [ -f done.flag ] && break
+  kill -0 $PID 2>/dev/null || { echo "PROCESS DIED"; break; }
+  sleep 2
+done
+```
+
+同理：等待子 agent / workflow 结果时用 `get_subagent_result` / `workflow_control status` 主动查询，而不是 sleep 后假设已完成。
 
 ---
 
