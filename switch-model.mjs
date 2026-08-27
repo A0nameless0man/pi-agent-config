@@ -9,12 +9,18 @@
  *   模板(tracked)             实际文件(untracked, gitignored)
  *   settings.json.example  →  settings.json
  *   agents/<role>.md.example → agents/<role>.md     (role ∈ profile.agents)
+ *   models.json.example    →  models.json          (深合并:标准 provider 以模板为准,
+ *                          本地独有 provider 如内网自建保留)
  *
  * 生成规则:
  *   agents/<role>.md   = 模板内容 + frontmatter 的 model:/thinking: 替换为 profile 值
  *   settings.json      = 模板为基底;保留实际文件中模板没有的键(如 lastChangelogVersion
  *                        等 pi 运行时写入的字段);再覆盖 defaultProvider/
  *                        defaultModel/defaultThinkingLevel 为 profile 值
+ *   models.json        = 本地基底,模板各 provider 定义整体覆盖(新模型随模板传播),
+ *                        仅本地独有 provider 保留。缺口背景:2026-08-27 irail
+ *                        visual agent 读图失败——模板加了 glm-5.3-flash 但本地
+ *                        models.json 停留在旧版,refresh 不覆盖导致模型未注册。
  *
  * 用法:
  *   node switch-model.mjs                     # 列出当前 + 可用 profile
@@ -33,6 +39,8 @@ const PROFILES_PATH = path.join(dir, "model-profiles.json");
 const SETTINGS_EXAMPLE = path.join(dir, "settings.json.example");
 const SETTINGS_PATH = path.join(dir, "settings.json");
 const AGENTS_DIR = path.join(dir, "agents");
+const MODELS_EXAMPLE = path.join(dir, "models.json.example");
+const MODELS_PATH = path.join(dir, "models.json");
 
 async function readJson(p) {
   return JSON.parse(await readFile(p, "utf8"));
@@ -99,6 +107,38 @@ function detectActiveProfile(profiles, settings) {
 }
 
 /**
+ * models.json 深合并:本地基底 + 模板标准 provider 整体覆盖,本地独有 provider 保留。
+ * 目的:模板新增/升级模型(如 glm-5.3-flash 多模态)随 refresh 传播到各机器,
+ * 不再依赖人工拷贝。models.json 损坏时跳过并警告,不静默覆盖以防丢本地内容。
+ */
+async function syncModelsJson() {
+  const exampleRaw = await readIfExists(MODELS_EXAMPLE);
+  if (exampleRaw === null) return "  models.json: SKIP (缺少 models.json.example,请先 git pull)";
+  const exampleProviders = JSON.parse(exampleRaw).providers ?? {};
+
+  const actualRaw = await readIfExists(MODELS_PATH);
+  let actual = null;
+  if (actualRaw !== null) {
+    try {
+      actual = JSON.parse(actualRaw);
+    } catch {
+      return "  models.json: SKIP (本地文件 JSON 解析失败,请人工检查后重试)";
+    }
+  }
+
+  // 展开顺序:本地在前 → 模板同者覆盖;本地独有 provider 自然保留
+  const merged = { ...(actual ?? {}), providers: { ...(actual?.providers ?? {}), ...exampleProviders } };
+  const next = `${JSON.stringify(merged, null, 2)}\n`;
+  if (next === actualRaw) return "  models.json: SKIP (已与模板一致)";
+
+  await writeFile(MODELS_PATH, next, "utf8");
+  const exCount = Object.keys(exampleProviders).length;
+  const localOnly = Object.keys(actual?.providers ?? {}).filter((p) => !(p in exampleProviders));
+  const suffix = localOnly.length ? `,保留本地独有: ${localOnly.join(", ")}` : "";
+  return `  models.json: 已同步 ${exCount} 个标准 provider${suffix}`;
+}
+
+/**
  * 核心:从 .example 模板 + profile 重新生成 settings.json 与 agents/<role>.md。
  * 实际文件是派生物——切换与 refresh 走同一条路径,保证语义一致。
  */
@@ -152,6 +192,9 @@ async function applyProfile(profiles, name) {
     await writeFile(path.join(AGENTS_DIR, `${role}.md`), next, "utf8");
     results.push(`  ${role}: ${spec.model ?? "-"} (thinking: ${spec.thinking ?? "-"})`);
   }
+
+  // 3) models.json 深合并(新模型随模板传播,本地独有 provider 保留)
+  results.push(await syncModelsJson());
 
   return { results, actual };
 }
