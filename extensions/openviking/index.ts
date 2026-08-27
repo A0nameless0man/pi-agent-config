@@ -73,21 +73,39 @@ export default async function (pi: ExtensionAPI) {
         }
       }
 
+      // LOCAL PATCH (hugua, 2026-08-24): capture session-bound data BEFORE any
+      // network await. pi >=0.84.2 asserts ctx freshness on every access, and
+      // if another /reload or session replacement lands while we're awaiting
+      // the OV server (health/ensureSession/profile can take seconds), the
+      // later ctx.sessionManager/ctx.ui access throws "stale ctx" (error seen
+      // on irail at index.ts:99). Plain values captured here survive
+      // replacement safely; if ctx is ALREADY stale, a newer runner's
+      // session_start will redo this work — bail out.
+      let piSessionId: string;
+      let initialBranch: any[] = [];
+      try {
+        piSessionId = ctx.sessionManager.getSessionId();
+        initialBranch = typeof ctx.sessionManager.getBranch === "function"
+          ? ctx.sessionManager.getBranch()
+          : [];
+      } catch {
+        return;
+      }
+
       // Health check
       connected = await client.health();
       if (!connected) {
         if (config.logLevel === "info") {
-          ctx.ui.notify("OpenViking: server not reachable", "warning");
+          safeNotify(ctx, "OpenViking: server not reachable", "warning");
         }
         return;
       }
 
       // Ensure OV session
-      const piSessionId = ctx.sessionManager.getSessionId();
       const ok = await sync.ensureSession(piSessionId);
       if (!ok) {
         if (config.logLevel !== "silent") {
-          ctx.ui.notify("OpenViking: failed to create session", "error");
+          safeNotify(ctx, "OpenViking: failed to create session", "error");
         }
         return;
       }
@@ -96,9 +114,7 @@ export default async function (pi: ExtensionAPI) {
       // Profile injection
       profileBlock = await buildSessionProfileBlock(client, config);
 
-      const branch = typeof ctx.sessionManager.getBranch === "function"
-        ? ctx.sessionManager.getBranch()
-        : [];
+      const branch = initialBranch;
       if (config.takeoverEnabled) {
         takeover.restore(branch);
         sync.restoreWatermark(takeover.state.syncedEntryCount);
@@ -116,7 +132,7 @@ export default async function (pi: ExtensionAPI) {
 
       started = true;
       if (config.logLevel === "info") {
-        ctx.ui.notify(`OpenViking connected (${piSessionId.slice(0, 8)}...)`, "info");
+        safeNotify(ctx, `OpenViking connected (${piSessionId.slice(0, 8)}...)`, "info");
       }
     })().finally(() => {
       startPromise = null;
@@ -239,7 +255,7 @@ export default async function (pi: ExtensionAPI) {
     description: "OpenViking status and manual operations. Use 'commit' to force a sync.",
     handler: async (args, ctx) => {
       if (!connected) {
-        ctx.ui.notify("OpenViking: not connected", "warning");
+        safeNotify(ctx, "OpenViking: not connected", "warning");
         return;
       }
 
@@ -250,13 +266,14 @@ export default async function (pi: ExtensionAPI) {
           ? await takeover.commitAndAdvance()
           : commitResult !== null;
         if (ok) {
-          ctx.ui.notify(
+          safeNotify(
+            ctx,
             "OpenViking: committed successfully" +
               (commitResult?.trace_id ? ` (trace_id=${commitResult.trace_id})` : ""),
             "info",
           );
         } else {
-          ctx.ui.notify("OpenViking: commit failed", "error");
+          safeNotify(ctx, "OpenViking: commit failed", "error");
         }
         return;
       }
@@ -267,7 +284,8 @@ export default async function (pi: ExtensionAPI) {
       const takeoverInfo = config.takeoverEnabled
         ? ` | takeover: ${t.coveredUserTurns}/${t.lastSeenUserTurns} turns archived, ~${t.pendingTokens} tokens pending`
         : "";
-      ctx.ui.notify(
+      safeNotify(
+        ctx,
         `OpenViking: ${connected ? "connected" : "disconnected"} | session: ${sid.slice(0, 12)}...${takeoverInfo}`,
         "info",
       );
@@ -278,6 +296,16 @@ export default async function (pi: ExtensionAPI) {
 // ================================================================
 // Helper Functions
 // ================================================================
+
+/** Notify via ctx, swallowing stale-ctx throws after session replacement/reload. */
+function safeNotify(ctx: any, message: string, kind: "info" | "warning" | "error"): void {
+  try {
+    ctx.ui.notify(message, kind);
+  } catch {
+    // LOCAL PATCH: ctx invalidated mid-handler by a concurrent reload/replacement;
+    // losing a toast is fine — never crash the handler over UI feedback.
+  }
+}
 
 /** Simple bypass pattern matching (prefix and glob). */
 function matchBypass(cwd: string, pattern: string): boolean {
@@ -339,7 +367,14 @@ function updateStatus(
   config: OVConfig,
   takeoverState?: { pendingTokens?: number; coveredUserTurns?: number },
 ): void {
-  const setter = ctx?.ui?.setStatus;
+  // LOCAL PATCH: ctx.ui getter itself asserts freshness (stale throws before
+  // reaching the inner try), so guard the property access too.
+  let setter: any;
+  try {
+    setter = ctx?.ui?.setStatus;
+  } catch {
+    return;
+  }
   if (typeof setter !== "function") return;
   const threshold = config.takeoverEnabled
     ? config.takeoverTokenThreshold
