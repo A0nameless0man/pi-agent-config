@@ -5,6 +5,7 @@
     "thinking": "high",
     "agents": {
       "scout": { "model": "deepseek/deepseek-v4-flash", "thinking": "low" },
+      "visual": { "model": "zhipu/glm-5.3-flash", "thinking": "low" },
       "planner": { "model": "deepseek/deepseek-v4-pro", "thinking": "medium" },
       "reviewer": { "model": "deepseek/deepseek-v4-pro", "thinking": "high" },
       "worker": { "model": "deepseek/deepseek-v4-pro", "thinking": "high" }
@@ -15,7 +16,8 @@
     "model": "glm-5.3",
     "thinking": "max",
     "agents": {
-      "scout": { "model": "zhipu/glm-4.7", "thinking": "low" },
+      "scout": { "model": "zhipu/glm-5.3-flash", "thinking": "low" },
+      "visual": { "model": "zhipu/glm-5.3-flash", "thinking": "low" },
       "planner": { "model": "zhipu/glm-5.3", "thinking": "medium" },
       "reviewer": { "model": "zhipu/glm-5.3", "thinking": "max" },
       "worker": { "model": "zhipu/glm-5.3", "thinking": "max" }
@@ -26,7 +28,8 @@
     "model": "glm-5.3",
     "thinking": "max",
     "agents": {
-      "scout": { "model": "zhipu-coding-personal/glm-4.7", "thinking": "low" },
+      "scout": { "model": "zhipu-coding-personal/glm-5.3-flash", "thinking": "low" },
+      "visual": { "model": "zhipu-coding-personal/glm-5.3-flash", "thinking": "low" },
       "planner": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "medium" },
       "reviewer": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "max" },
       "worker": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "max" }
@@ -37,7 +40,8 @@
     "model": "glm-5.3",
     "thinking": "max",
     "agents": {
-      "scout": { "model": "zhipu-coding-company/glm-4.7", "thinking": "low" },
+      "scout": { "model": "zhipu-coding-company/glm-5.3-flash", "thinking": "low" },
+      "visual": { "model": "zhipu-coding-company/glm-5.3-flash", "thinking": "low" },
       "planner": { "model": "zhipu-coding-company/glm-5.3", "thinking": "medium" },
       "reviewer": { "model": "zhipu-coding-company/glm-5.3", "thinking": "max" },
       "worker": { "model": "zhipu-coding-company/glm-5.3", "thinking": "max" }
