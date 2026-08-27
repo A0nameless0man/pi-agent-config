@@ -69,16 +69,16 @@ pi 核心工具仅包含 read / write / edit / bash,**没有 `task` 工具**。�
 -   **`Agent`** — 启动子Agent,核心参数:`subagent_type`、`prompt`、`description`、`model`、`thinking`、`run_in_background`、`isolated`、`isolation: "worktree"`、`inherit_context`
 -   **`get_subagent_result`** — 查询后台子Agent状态/结果(`wait` / `verbose`)
 -   **`steer_subagent`** — 向运行中的子Agent注入转向消息,无需重启
--   **角色定义**:`~/.pi/agent/agents/*.md`(全局)/ `.pi/agents/*.md`(项目)/ `.agents/agents/*.md`,预置角色包括 `planner`(计划)、`reviewer`(审查)、`scout`(侦察)、`worker`(执行),另内置 `general-purpose` / `Explore` / `Plan`
+-   **角色定义**:`~/.pi/agent/agents/*.md`(全局)/ `.pi/agents/*.md`(项目)/ `.agents/agents/*.md`,预置角色包括 `planner`(计划)、`reviewer`(审查)、`scout`(侦察)、`worker`(执行)、`visual`(视觉分析,多模态模型专属),另内置 `general-purpose` / `Explore` / `Plan`
 -   **并发**:后台子Agent默认 4 并发,超出自动排队;`/agents` → Settings 可调整
 -   **上下文传递**:`Agent` 的 prompt 即任务交接文档,必须包含下方 目标 / 工作环境 / 约束条件 / 参考信息 四要素
 -   **管理命令**:`/agents` 交互菜单(查看运行中 agent、创建/编辑自定义 agent、调整并发/嵌套深度等)
 
 **角色模型分工**(由 `model-profiles.json` 定义,`bash ~/.pi/agent/switch-model.sh <profile>` 切换,当前会话立刻换用 `/model`):
--   `scout` — profile 快速档(flash)+ low thinking
+-   `scout` / `visual` — profile 快速档(flash)+ low thinking;`visual` 为多模态视觉分析(读图/截图对比),依赖 glm-5.3-flash
 -   `planner` / `reviewer` / `worker` — profile 主力档(pro),thinking medium / high / high
 -   `Explore` — 由 glla 管理、继承父模型,不在 profile 里
--   profile 派生文件(settings.json / agents/<role>.md)不进 git,由模板生成;**改共享配置改 `.example`**,多机同步/冷启动/key 分发见 `pi-config-dev` skill
+-   profile 派生与多机同步机制(.example 模板、install.sh、key 中转)详见 extensions/pi-dev-context/PI-DEV.md(仅在本目录工作时自动注入)
 
 ## 任务交接示例
 
@@ -535,6 +535,7 @@ Co-Authored-By: DeepSeek-V4 (deepseek/deepseek-v4) <noreply+deepseek-v4@deepseek
 两个扩展分工共存，**避免双重捕获**：
 
 - **官方扩展** `~/.pi/agent/extensions/openviking/`（来自 volcengine/OpenViking upstream）——负责自动 recall（每轮 prompt 同步检索注入）、turn 捕获、commit、viking:// URI guard。takeover 已关闭（跨会话上下文由 acp 扩展负责）。凭证读 `~/.openviking/ovcli.conf`（不进 git，多机需单独分发）
+  - **本地补丁**（两处偏离 upstream，重装/升级官方扩展会被覆盖，必须重打）：细节已迁至 extensions/pi-dev-context/PI-DEV.md（仅在配置目录内工作时自动注入）
 - **自维护扩展** `~/.pi/agent/extensions/openviking-memory/`（toolsOnly 模式，`openviking-config.json` 中 `"toolsOnly": true`）——只注册 memwrite/memimport 两个工具，不做捕获/recall/commit
 
 ### 知识结构
