@@ -69,16 +69,25 @@ pi 核心工具仅包含 read / write / edit / bash,**没有 `task` 工具**。�
 -   **`Agent`** — 启动子Agent,核心参数:`subagent_type`、`prompt`、`description`、`model`、`thinking`、`run_in_background`、`isolated`、`isolation: "worktree"`、`inherit_context`
 -   **`get_subagent_result`** — 查询后台子Agent状态/结果(`wait` / `verbose`)
 -   **`steer_subagent`** — 向运行中的子Agent注入转向消息,无需重启
--   **角色定义**:`~/.pi/agent/agents/*.md`(全局)/ `.pi/agents/*.md`(项目)/ `.agents/agents/*.md`,预置角色包括 `planner`(计划)、`reviewer`(审查)、`scout`(侦察)、`worker`(执行)、`visual`(视觉分析,多模态模型专属),另内置 `general-purpose` / `Explore` / `Plan`
+-   **角色定义**:`~/.pi/agent/agents/*.md`(全局)/ `.pi/agents/*.md`(项目)/ `.agents/agents/*.md`,预置角色包括 `planner`(计划)、`reviewer`(审查)、`scout`(侦察)、`worker`(执行)、`visual`(视觉分析)、`visual-worker`(worker+visual,执行中主动用视觉,均多模态模型专属),另内置 `general-purpose` / `Explore` / `Plan`
 -   **并发**:后台子Agent默认 4 并发,超出自动排队;`/agents` → Settings 可调整
 -   **上下文传递**:`Agent` 的 prompt 即任务交接文档,必须包含下方 目标 / 工作环境 / 约束条件 / 参考信息 四要素
 -   **管理命令**:`/agents` 交互菜单(查看运行中 agent、创建/编辑自定义 agent、调整并发/嵌套深度等)
 
 **角色模型分工**(由 `model-profiles.json` 定义,`bash ~/.pi/agent/switch-model.sh <profile>` 切换,当前会话立刻换用 `/model`):
--   `scout` / `visual` — profile 快速档(flash)+ low thinking;`visual` 为多模态视觉分析(读图/截图对比),依赖 glm-5.3-flash
+-   `scout` — profile 快速档(flash)+ low thinking
+-   `visual` — 多模态快速视觉分析(读图/截图对比),视觉模型 + low thinking;`visual-worker` — worker+visual 复合角色(边执行边用视觉:截图核对迭代、设计还原验证),视觉模型 + max thinking
 -   `planner` / `reviewer` / `worker` — profile 主力档(pro),thinking medium / high / high
+-   视觉模型分配:zhipu 系 profile 用 glm-5.3-flash,deepseek profile 用 deepseek-v4-flash-vision-exp(不再跨 provider 依赖)
 -   `Explore` — 由 glla 管理、继承父模型,不在 profile 里
 -   profile 派生与多机同步机制(.example 模板、install.sh、key 中转)详见 extensions/pi-dev-context/PI-DEV.md(仅在本目录工作时自动注入)
+
+**视觉任务约束**(涉及图像理解、或产出需要"看"来验证的任务时强制执行):
+-   **触发场景**:UI/页面设计与还原(设计稿 vs 渲染截图对比、布局错位诊断、视觉回归)、2D/3D 空间数学(几何示意图判读、坐标系变换图解、轨迹/点云/地图可视化、仿真场景截图核对)、图表与数据可视化(chart 与数据一致性核对、坐标轴/图例审校、大屏效果检查)、架构/流程/时序图理解与渲染验证、文档影像(PDF/扫描件/表格截图/白板照片提取)、过程验证(浏览器截图验收、图形渲染迭代、报错弹窗/接线图/设备面板判读)
+-   **规则**:
+    -   存在图像输入、或产出需要"看"来验证时,必须实际读图,**禁止凭文字描述或想象臆测图像内容**
+    -   一次性判读(看一眼/提取表面信息)→ `visual`(快速档);**边执行边用视觉的工作**(截图→核对→修改迭代、UI 调到与设计稿一致、可视化生成后自检)或看懂后需深度推理/对比判断 → `visual-worker`
+    -   主模型自身多模态时直接读图(vision-nudge 扩展会在系统提示词中提醒充分用眼);text-only 主模型遇到图像任务必须派 visual 系角色
 
 ## 任务交接示例
 

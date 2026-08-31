@@ -5,7 +5,8 @@
     "thinking": "high",
     "agents": {
       "scout": { "model": "deepseek/deepseek-v4-flash", "thinking": "low" },
-      "visual": { "model": "zhipu/glm-5.3-flash", "thinking": "low" },
+      "visual": { "model": "deepseek/deepseek-v4-flash-vision-exp", "thinking": "low" },
+      "visual-worker": { "model": "deepseek/deepseek-v4-flash-vision-exp", "thinking": "max" },
       "planner": { "model": "deepseek/deepseek-v4-pro", "thinking": "medium" },
       "reviewer": { "model": "deepseek/deepseek-v4-pro", "thinking": "high" },
       "worker": { "model": "deepseek/deepseek-v4-pro", "thinking": "high" }
@@ -18,6 +19,7 @@
     "agents": {
       "scout": { "model": "zhipu/glm-5.3-flash", "thinking": "low" },
       "visual": { "model": "zhipu/glm-5.3-flash", "thinking": "low" },
+      "visual-worker": { "model": "zhipu/glm-5.3-flash", "thinking": "max" },
       "planner": { "model": "zhipu/glm-5.3", "thinking": "medium" },
       "reviewer": { "model": "zhipu/glm-5.3", "thinking": "max" },
       "worker": { "model": "zhipu/glm-5.3", "thinking": "max" }
@@ -30,6 +32,7 @@
     "agents": {
       "scout": { "model": "zhipu-coding-personal/glm-5.3-flash", "thinking": "low" },
       "visual": { "model": "zhipu-coding-personal/glm-5.3-flash", "thinking": "low" },
+      "visual-worker": { "model": "zhipu-coding-personal/glm-5.3-flash", "thinking": "max" },
       "planner": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "medium" },
       "reviewer": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "max" },
       "worker": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "max" }
@@ -42,6 +45,7 @@
     "agents": {
       "scout": { "model": "zhipu-coding-company/glm-5.3-flash", "thinking": "low" },
       "visual": { "model": "zhipu-coding-company/glm-5.3-flash", "thinking": "low" },
+      "visual-worker": { "model": "zhipu-coding-company/glm-5.3-flash", "thinking": "max" },
       "planner": { "model": "zhipu-coding-company/glm-5.3", "thinking": "medium" },
       "reviewer": { "model": "zhipu-coding-company/glm-5.3", "thinking": "max" },
       "worker": { "model": "zhipu-coding-company/glm-5.3", "thinking": "max" }

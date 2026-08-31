@@ -21,7 +21,7 @@ git 只跟踪**模板与源码**；实际生效文件是**机器本地派生物�
 | `settings.json.example` | `settings.json`（switch-model 生成） |
 | `agents/{planner,reviewer,scout,worker}.md.example` | `agents/<role>.md`（switch-model 生成） |
 | `models.json.example`（仅公开标准 provider） | `models.json`（可含内网自建 provider） |
-| `skills/`、`extensions/`、`install.sh`、`switch-model.*`、`model-profiles.json`（角色分工：scout/visual=flash，planner/reviewer/worker=pro；visual 需多模态模型，deepseek profile 下跨 provider 用 zhipu/glm-5.3-flash） | `auth.json`、`extensions/openviking-memory/openviking-config.json`、`~/.openviking/ovcli.conf`（官方扩展凭证）、`skills/glm-plan-usage/team.json` |
+| `skills/`、`extensions/`、`install.sh`、`switch-model.*`、`model-profiles.json`（角色分工：scout/visual=flash，visual-worker=视觉+max，planner/reviewer/worker=pro；visual/visual-worker 需多模态模型——zhipu 系用 glm-5.3-flash，deepseek 用 deepseek-v4-flash-vision-exp） | `auth.json`、`extensions/openviking-memory/openviking-config.json`、`~/.openviking/ovcli.conf`（官方扩展凭证）、`skills/glm-plan-usage/team.json` |
 
 **核心规则：持久改动必须写 `.example` 模板**。直接编辑实际文件（settings.json、agents/*.md）
 会在下次 switch-model / refresh 时被模板覆盖。
