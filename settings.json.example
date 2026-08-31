@@ -10,7 +10,7 @@
     "npm:@tintinweb/pi-subagents",
     "npm:@juicesharp/rpiv-ask-user-question",
     "npm:@juicesharp/rpiv-todo",
-    "git:github.com/A0nameless0man/pi-goal-list-loop-audit@fix/windows-pi-spawn-enoent",
+    "git:github.com/DraconDev/pi-goal-list-loop-audit",
     "npm:pi-sessions"
   ],
   "steeringMode": "all",
