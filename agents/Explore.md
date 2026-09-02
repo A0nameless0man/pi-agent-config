@@ -3,7 +3,7 @@ description: 'Fast read-only search agent for locating code. Use it to find file
 tools: read, bash, grep, find, ls
 prompt_mode: replace
 x-managed-by: pi-goal-list-loop-audit
-x-glla-note: model pin removed (upstream default pins a fixed model) so this agent inherits the parent session model and its quota pool. Managed by glla — flip /glla subagent strategy to agent-default to restore upstream behavior.
+x-glla-note: model pin removed (upstream default pins a fixed model) so this agent inherits the parent session model. Managed by glla — flip /glla subagent strategy to agent-default to restore upstream behavior.
 ---
 
 # CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS
