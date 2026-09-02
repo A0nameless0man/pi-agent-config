@@ -254,7 +254,7 @@ Git Bash 默认 UTF-8,中文输出通常正常。如遇乱码:
 
 如果确实需要执行大量重复命令，使用 write 写入一个临时 shell 脚本然后执行它
 
-### Shell 陷阱：后台命令与进程终止
+### Shell 陷阱
 
 pi 的 bash 工具通过 `bash -c "<cmd>"` 执行命令，存在结构性陷阱：
 
@@ -343,6 +343,21 @@ done
 ```
 
 同理：等待子 agent / workflow 结果时用 `get_subagent_result` / `workflow_control status` 主动查询，而不是 sleep 后假设已完成。
+
+#### 陷阱 4：长命令输出不落盘，失败后被迫重跑
+
+**根因**：pi bash 工具的 stdout 截断到最后 2000 行 / 50KB，命令失败或超时时中间输出直接丢失。自动化测试、编译、数据迁移这类长命令一旦失败，往往看不到完整报错，只能整条重跑——长命令重跑一次几分钟起步，浪费成倍时间。
+
+**必须**：长命令（测试套件、构建、批量处理）一律 `2>&1 | tee <logfile>` 落盘：
+
+```bash
+# 输出同时进终端和日志文件；pipefail 保证拿到真实退出码而非 tee 的
+set -o pipefail
+pytest tests 2>&1 | tee /tmp/pytest.log
+cargo build --release 2>&1 | tee /tmp/build.log
+```
+
+失败后先 `grep` 日志文件定位报错，再决定是否重跑；完整输出不受工具截断影响。注意 `cmd | tee` 默认返回 tee 的退出码，必须配合 `set -o pipefail` 或 `${PIPESTATUS[0]}` 判断原命令成败，否则失败的命令会被误判为成功。
 
 ---
 
