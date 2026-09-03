@@ -9,7 +9,8 @@
       "visual-worker": { "model": "deepseek/deepseek-v4-flash-vision-exp", "thinking": "max" },
       "planner": { "model": "deepseek/deepseek-v4-pro", "thinking": "medium" },
       "reviewer": { "model": "deepseek/deepseek-v4-pro", "thinking": "high" },
-      "worker": { "model": "deepseek/deepseek-v4-pro", "thinking": "high" }
+      "worker": { "model": "deepseek/deepseek-v4-pro", "thinking": "high" },
+      "Designer": { "model": "deepseek/deepseek-v4-pro", "thinking": "medium" }
     }
   },
   "zhipu": {
@@ -22,7 +23,8 @@
       "visual-worker": { "model": "zhipu/glm-5.3-flash", "thinking": "max" },
       "planner": { "model": "zhipu/glm-5.3", "thinking": "medium" },
       "reviewer": { "model": "zhipu/glm-5.3", "thinking": "max" },
-      "worker": { "model": "zhipu/glm-5.3", "thinking": "max" }
+      "worker": { "model": "zhipu/glm-5.3", "thinking": "max" },
+      "Designer": { "model": "zhipu/glm-5.3", "thinking": "medium" }
     }
   },
   "zhipu-coding-personal": {
@@ -35,7 +37,8 @@
       "visual-worker": { "model": "zhipu-coding-personal/glm-5.3-flash", "thinking": "max" },
       "planner": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "medium" },
       "reviewer": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "max" },
-      "worker": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "max" }
+      "worker": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "max" },
+      "Designer": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "medium" }
     }
   },
   "zhipu-coding-company": {
@@ -48,7 +51,8 @@
       "visual-worker": { "model": "zhipu-coding-company/glm-5.3-flash", "thinking": "max" },
       "planner": { "model": "zhipu-coding-company/glm-5.3", "thinking": "medium" },
       "reviewer": { "model": "zhipu-coding-company/glm-5.3", "thinking": "max" },
-      "worker": { "model": "zhipu-coding-company/glm-5.3", "thinking": "max" }
+      "worker": { "model": "zhipu-coding-company/glm-5.3", "thinking": "max" },
+      "Designer": { "model": "zhipu-coding-company/glm-5.3", "thinking": "medium" }
     }
   }
 }
