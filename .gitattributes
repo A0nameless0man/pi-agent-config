@@ -1,0 +1,3 @@
+# bash 脚本跨平台保持 LF：Windows autocrlf 会把 checkout 的 .sh 转成 CRLF，
+# 导致 Git Bash/Linux 下 shebang 与行尾  报错
+*.sh text eol=lf
