@@ -11,6 +11,9 @@
           "input": [
             "text"
           ],
+          "thinkingLevelMap": {
+            "off": "none"
+          },
           "contextWindow": 1048576,
           "maxTokens": 393216,
           "cost": {
@@ -27,6 +30,9 @@
           "input": [
             "text"
           ],
+          "thinkingLevelMap": {
+            "off": "none"
+          },
           "contextWindow": 1048576,
           "maxTokens": 393216,
           "cost": {
@@ -44,6 +50,29 @@
             "text",
             "image"
           ],
+          "thinkingLevelMap": {
+            "off": "none"
+          },
+          "contextWindow": 1048576,
+          "maxTokens": 393216,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
+        },
+        {
+          "id": "deepseek-flash",
+          "name": "DeepSeek V4.1 Flash",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "thinkingLevelMap": {
+            "off": "none"
+          },
           "contextWindow": 1048576,
           "maxTokens": 393216,
           "cost": {

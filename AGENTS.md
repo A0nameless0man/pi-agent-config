@@ -78,7 +78,7 @@ pi 核心工具仅包含 read / write / edit / bash,**没有 `task` 工具**。�
 -   `scout` — profile 快速档(flash)+ low thinking
 -   `visual` — 多模态快速视觉分析(读图/截图对比),视觉模型 + low thinking;`visual-worker` — worker+visual 复合角色(边执行边用视觉:截图核对迭代、设计还原验证),视觉模型 + max thinking
 -   `planner` / `reviewer` / `worker` — profile 主力档(pro),thinking medium / high / high;`Designer` — 主力档(pro)+ medium(只读设计角色,与 planner 同档)
--   视觉模型分配:zhipu 系 profile 用 glm-5.3-flash,deepseek profile 用 deepseek-v4-flash-vision-exp(不再跨 provider 依赖)
+-   视觉模型分配:zhipu 系 profile 用 glm-5.3-flash,deepseek profile 用 deepseek-flash(2026-09 起 V4.1 Flash 原生多模态,文本/视觉统一同一个 flash 模型)
 -   `Explore` — 由 glla 管理、继承父模型,不在 profile 里
 -   profile 派生与多机同步机制(.example 模板、install.sh、key 中转)详见 extensions/pi-dev-context/PI-DEV.md(仅在本目录工作时自动注入)
 

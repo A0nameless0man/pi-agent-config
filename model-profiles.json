@@ -1,16 +1,16 @@
 {
   "deepseek": {
     "provider": "deepseek",
-    "model": "deepseek-v4-pro",
+    "model": "deepseek-flash",
     "thinking": "high",
     "agents": {
-      "scout": { "model": "deepseek/deepseek-v4-flash", "thinking": "low" },
-      "visual": { "model": "deepseek/deepseek-v4-flash-vision-exp", "thinking": "low" },
-      "visual-worker": { "model": "deepseek/deepseek-v4-flash-vision-exp", "thinking": "max" },
-      "planner": { "model": "deepseek/deepseek-v4-pro", "thinking": "medium" },
-      "reviewer": { "model": "deepseek/deepseek-v4-pro", "thinking": "high" },
-      "worker": { "model": "deepseek/deepseek-v4-pro", "thinking": "high" },
-      "Designer": { "model": "deepseek/deepseek-v4-pro", "thinking": "medium" }
+      "scout": { "model": "deepseek/deepseek-flash", "thinking": "low" },
+      "visual": { "model": "deepseek/deepseek-flash", "thinking": "low" },
+      "visual-worker": { "model": "deepseek/deepseek-flash", "thinking": "max" },
+      "planner": { "model": "deepseek/deepseek-flash", "thinking": "medium" },
+      "reviewer": { "model": "deepseek/deepseek-flash", "thinking": "high" },
+      "worker": { "model": "deepseek/deepseek-flash", "thinking": "high" },
+      "Designer": { "model": "deepseek/deepseek-flash", "thinking": "medium" }
     }
   },
   "zhipu": {

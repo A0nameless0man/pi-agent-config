@@ -42,14 +42,16 @@ bash ~/.pi/agent/switch-model.sh refresh              # 检测当前 profile,从
 
 | profile | 主力(pro / thinking) | 快速(flash / thinking) |
 |---------|----------------------|------------------------|
-| deepseek | deepseek/deepseek-v4-pro / high | deepseek/deepseek-v4-flash / low |
-| zhipu | zhipu/glm-5.2 / high | zhipu/glm-4.7 / low |
-| zhipu-coding-personal | zhipu-coding-personal/glm-5.2 / high | zhipu-coding-personal/glm-4.7 / low |
-| zhipu-coding-company | zhipu-coding-company/glm-5.2 / high | zhipu-coding-company/glm-4.7 / low |
+| deepseek | deepseek/deepseek-flash / high | deepseek/deepseek-flash / low |
+| zhipu | zhipu/glm-5.3 / high | zhipu/glm-5.3-flash / low |
+| zhipu-coding-personal | zhipu-coding-personal/glm-5.3 / high | zhipu-coding-personal/glm-5.3-flash / low |
+| zhipu-coding-company | zhipu-coding-company/glm-5.3 / high | zhipu-coding-company/glm-5.3-flash / low |
 
 角色分工(默认):`scout` 用快速档(low),`planner`(medium)/ `reviewer` / `worker`(high)用主力档。`Explore` 不在 profile 里,由 glla 管理(继承父模型)。
 
 thinking 合法取值:off / minimal / low / medium / high / xhigh / max。
+
+注意:DeepSeek V4.1 系(`deepseek-flash`/`deepseek-v4-pro`)枚举虽接受 7 档,但服务端实际只折叠成 none/low/high/max 四档:minimal→low,medium/high/xhigh→high,max/ultra→max(官方映射表,2026-09)。给 deepseek profile 配 medium 不会比 high 省任何 token。
 
 ## 注意事项
 
