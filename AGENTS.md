@@ -70,7 +70,7 @@ pi 核心工具仅包含 read / write / edit / bash,**没有 `task` 工具**。�
 -   **`get_subagent_result`** — 查询后台子Agent状态/结果(`wait` / `verbose`)
 -   **`steer_subagent`** — 向运行中的子Agent注入转向消息,无需重启
 -   **角色定义**:`~/.pi/agent/agents/*.md`(全局)/ `.pi/agents/*.md`(项目)/ `.agents/agents/*.md`,预置角色包括 `planner`(计划)、`reviewer`(审查)、`scout`(侦察)、`worker`(执行)、`visual`(视觉分析)、`visual-worker`(worker+visual,执行中主动用视觉,均多模态模型专属)、`Designer`(只读设计审查,产架构/受影响文件/风险/验证方案),另内置 `general-purpose` / `Explore` / `Plan`
--   **并发**:后台子Agent默认 4 并发,超出自动排队;`/agents` → Settings 可调整
+-   **并发**:后台子Agent默认 10 并发,现配 6,超出自动排队;`/agents` → Settings 可调整
 -   **上下文传递**:`Agent` 的 prompt 即任务交接文档,必须包含下方 目标 / 工作环境 / 约束条件 / 参考信息 四要素
 -   **管理命令**:`/agents` 交互菜单(查看运行中 agent、创建/编辑自定义 agent、调整并发/嵌套深度等)
 
@@ -391,15 +391,16 @@ cargo build --release 2>&1 | tee /tmp/build.log
 
 当需要派发**大量同类、独立的子任务**（如审查 N 个文件、收集 N 个 API 文档、回归验证 N 个用例）时，有两种派发方式：
 
--   **方式 A - pi-subagents 交互式**：用 `Agent` 工具（`run_in_background: true`）逐个/并行 spawn 子Agent，适合 1-5 个任务、需要中途 steering、或与父会话共享上下文的场景。默认 4 并发，超出自动排队
--   **方式 B - `SubagentWorkflow` 确定性编排（批量派发的首选模式）**：pi-subagents 内置的编排工具，把请求写成确定性 JS 编排脚本（`agent()` / `parallel()` / `pipeline()` / `phase()`），后台运行，适合 6+ 个同类独立任务。上限 16 并发 / 1000 总量，支持 per-agent 模型路由、journal 断点续跑（`resumeFromRunId`）、schema 结构化输出、git worktree 隔离、gate 命令门控。**不要**再手写 pi SDK 脚本或 spawn `pi -p` 子进程做批量派发——`SubagentWorkflow` 是唯一批量模式
+-   **方式 A - pi-subagents 交互式**：用 `Agent` 工具（`run_in_background: true`）逐个/并行 spawn 子Agent，适合 1-5 个任务、需要中途 steering、或与父会话共享上下文的场景。并发上限 6，超出自动排队
+-   **方式 B - `SubagentWorkflow` 确定性编排（批量派发的首选模式）**：pi-subagents 内置的编排工具，把请求写成确定性 JS 编排脚本（`agent()` / `parallel()` / `pipeline()` / `phase()`），后台运行，适合 6+ 个同类独立任务。引擎并发上限 `min(16, cpus-2)` / 1000 总量（实际并发须控 ≤6 防供应商限流，见要点 4），支持 per-agent 模型路由、journal 断点续跑（`resumeFromRunId`）、schema 结构化输出、git worktree 隔离、gate 命令门控。**不要**再手写 pi SDK 脚本或 spawn `pi -p` 子进程做批量派发——`SubagentWorkflow` 是唯一批量模式
 
 **`SubagentWorkflow` 使用要点**：
 
 1. 自然语言描述需求即可（如“审查 src/routes/ 下每个路由是否缺少鉴权”），由 Pi 写成编排脚本经 `SubagentWorkflow` 后台运行；关键词 `workflow` 默认触发
 2. 常用脚本存为 `.pi/workflows/<name>.js`，之后按 `name` 调用复用，不必重发脚本源码
 3. **pilot 门控**：任务量 ≥6 时，**必须**先抽样 2-3 个跑 pilot，确认无系统性问题才放行全量
-4. 中途进度、暂停/恢复/停止用 `/agents` → Workflows 面板；中断后续跑用 `resumeFromRunId`（同会话、run 已结束）
+4. **并发控制（供应商限流防护）**：引擎并发硬编码 `min(16, cpus-2)` **不可配置**（16 核机实际 14），一次性放量易触发模型供应商并发/速率限制（429）。写编排脚本时**必须**把同时 in-flight 的 `agent()` 控制在 ≤6：长列表在脚本内分批 wave（每批 ≤6 个调用，`await` 整批完成再放下一批）或实现简单信号量限流；避免把全量列表直接丢给 `parallel()`/`pipeline()`。`pipeline` 的瓶颈是逐项独立流过各 stage，同样受此约束
+5. 中途进度、暂停/恢复/停止用 `/agents` → Workflows 面板；中断后续跑用 `resumeFromRunId`（同会话、run 已结束）
 
 **依赖规则**：
 
