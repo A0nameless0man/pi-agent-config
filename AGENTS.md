@@ -207,7 +207,7 @@ pi -p --mode json "..."       # 结构化输出，便于程序解析
 pi -p --no-session "..."      # 临时运行，不保存会话
 ```
 
-典型用途：CI 集成、自动化脚本、单次任务处理。**程序化子 agent 批量派发不用 `pi -p`**，一律用 `pi-dynamic-workflows`（确定性编排脚本 + 断点续跑，见"子代理批量派发策略"）。
+典型用途：CI 集成、自动化脚本、单次任务处理。**程序化子 agent 批量派发不用 `pi -p`**，一律用 pi-subagents 的 `SubagentWorkflow`（确定性编排脚本 + 断点续跑，见“子代理批量派发策略”）。
 
 ## Skills
 
@@ -347,7 +347,7 @@ for i in $(seq 1 60); do
 done
 ```
 
-同理：等待子 agent / workflow 结果时用 `get_subagent_result` / `workflow_control status` 主动查询，而不是 sleep 后假设已完成。
+同理：等待子 agent 结果时用 `get_subagent_result` 主动查询；后台 workflow 完成时会自动通知完成结果，不要 sleep 后假设已完成。
 
 #### 陷阱 4：长命令输出不落盘，失败后被迫重跑
 
@@ -392,15 +392,14 @@ cargo build --release 2>&1 | tee /tmp/build.log
 当需要派发**大量同类、独立的子任务**（如审查 N 个文件、收集 N 个 API 文档、回归验证 N 个用例）时，有两种派发方式：
 
 -   **方式 A - pi-subagents 交互式**：用 `Agent` 工具（`run_in_background: true`）逐个/并行 spawn 子Agent，适合 1-5 个任务、需要中途 steering、或与父会话共享上下文的场景。默认 4 并发，超出自动排队
--   **方式 B - pi-dynamic-workflows 确定性编排（批量派发的首选模式）**：让 Pi 把请求写成确定性 JS 编排脚本（`agent()` / `parallel()` / `pipeline()` / `phase()`），后台运行，适合 6+ 个同类独立任务。上限 16 并发 / 1000 总量，支持 per-agent 模型路由、journal 断点续跑、真实 token/成本核算、git worktree 隔离。**不要**再手写 pi SDK 脚本或 spawn `pi -p` 子进程做批量派发——workflows 是唯一模式
+-   **方式 B - `SubagentWorkflow` 确定性编排（批量派发的首选模式）**：pi-subagents 内置的编排工具，把请求写成确定性 JS 编排脚本（`agent()` / `parallel()` / `pipeline()` / `phase()`），后台运行，适合 6+ 个同类独立任务。上限 16 并发 / 1000 总量，支持 per-agent 模型路由、journal 断点续跑（`resumeFromRunId`）、schema 结构化输出、git worktree 隔离、gate 命令门控。**不要**再手写 pi SDK 脚本或 spawn `pi -p` 子进程做批量派发——`SubagentWorkflow` 是唯一批量模式
 
-**pi-dynamic-workflows 使用要点**：
+**`SubagentWorkflow` 使用要点**：
 
-1. 自然语言描述需求即可（如"审查 src/routes/ 下每个路由是否缺少鉴权"），或显式 `/workflows run <prompt>`；关键词 `workflow` 默认触发
-2. 内置工作流直接可用：`/code-review`（7 个并行审查角度 + 验证）、`/codebase-audit`、`/deep-research`（带引用的联网研究）、`/multi-perspective`、`/adversarial-review`
+1. 自然语言描述需求即可（如“审查 src/routes/ 下每个路由是否缺少鉴权”），由 Pi 写成编排脚本经 `SubagentWorkflow` 后台运行；关键词 `workflow` 默认触发
+2. 常用脚本存为 `.pi/workflows/<name>.js`，之后按 `name` 调用复用，不必重发脚本源码
 3. **pilot 门控**：任务量 ≥6 时，**必须**先抽样 2-3 个跑 pilot，确认无系统性问题才放行全量
-4. 中途用 `/workflows` TUI 或 `workflow_control` 工具 list/status/pause/resume/stop；断点续跑用 `resumeFromRunId`
-5. 模型 tier（small/medium/big）在 `~/.pi/workflows/model-tiers.json`，用 `/workflows-models` 编辑
+4. 中途进度、暂停/恢复/停止用 `/agents` → Workflows 面板；中断后续跑用 `resumeFromRunId`（同会话、run 已结束）
 
 **依赖规则**：
 
@@ -412,8 +411,8 @@ cargo build --release 2>&1 | tee /tmp/build.log
 | 任务特征 | 推荐 |
 |---|---|
 | 1-5 个独立任务 | pi-subagents `Agent` 工具（可后台并行 + steering） |
-| **6+ 个同类独立任务** | pi-dynamic-workflows（方式 B，唯一批量模式）（分批 wave，pilot 门控） |
-| **静态依赖**（B 必须在 A 后但范围预设） | workflows `pipeline` / phase 编排 |
+| **6+ 个同类独立任务** | pi-subagents `SubagentWorkflow`（分批 wave，pilot 门控） |
+| **静态依赖**（B 必须在 A 后但范围预设） | `SubagentWorkflow` 的 `pipeline` / phase 编排 |
 | **动态依赖**（B 的范围由 A 的结果决定） | pi-subagents 串行（强制） |
 | 子任务需向父 agent 问澄清 | pi-subagents 串行（强制） |
 

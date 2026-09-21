@@ -6,7 +6,6 @@
   "defaultThinkingLevel": "high",
   "packages": [
     "npm:pi-effort",
-    "npm:@quintinshaw/pi-dynamic-workflows",
     "npm:@tintinweb/pi-subagents",
     "npm:@juicesharp/rpiv-ask-user-question",
     "npm:@juicesharp/rpiv-todo",
