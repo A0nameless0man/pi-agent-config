@@ -44,11 +44,15 @@ description: Git commit conventions - standardized commit message format and wor
 
 11. **If commit is blocked by pre-commit**: refer to step 5 to stage formatting tool changes and **re-commit**. **Important**: A commit blocked by pre-commit did not actually succeed, so **cannot** use amend to modify. Should re-commit instead.
 
-12. **If commit fails with GPG signing error** (e.g., `gpg failed to sign the data`, lock timeout):
-    - Check `git --no-pager log --show-signature -1` to confirm signing is configured
-    - Find stale lock: `find ~/.gnupg -name "*.lock"` (via `bash`)
-    - If the locking process is dead (`ps -p <pid>` shows nothing), remove the stale lock: `rm -f ~/.gnupg/public-keys.d/pubring.db.lock`
-    - If still stuck: `gpgconf --kill gpg-agent` (agent auto-restarts on next use), then retry
+12. **If commit hangs or fails with a GPG signing error** (e.g., `gpg failed to sign the data`, lock timeout, or no error output at all):
+    - Always run `git commit` under a hard timeout (`timeout 90 git commit ...`) — a signing hang otherwise blocks the tool call until it dies
+    - Confirm signing is configured: `git --no-pager log --show-signature -1`
+    - **Derive the GnuPG home from `git config --get gpg.program`, never from `~/.gnupg`.** On Windows two installs coexist: MSYS gpg (Git Bash, home `~/.gnupg`, typically holds **no private keys**) and the system GnuPG (`C:\Program Files\GnuPG\bin\gpg.exe`, home `%APPDATA%\gnupg`, holds the signing key). Diagnosing in the MSYS home produces a misleading `No secret key`
+    - Clean stale locks/sockets in the **system** home (after confirming no `gpg.exe` / `gpg-agent.exe` is alive):
+      `rm -f "$APPDATA/gnupg/S.gpg-agent"* "$APPDATA/gnupg/gnupg_spawn_keyboxd_sentinel.lock" "$APPDATA/gnupg/trustdb.gpg.lock"`
+      then re-run `"$GPGPROGRAM" --list-secret-keys` so keyboxd/gpg-agent respawn. A stale keyboxd sentinel lock surfaces as `invalid size of lockfile` / `can't connect to the keyboxd`
+    - Prove signing works before committing: `echo test | "$GPGPROGRAM" --batch --pinentry-mode loopback --passphrase "" --local-user <fpr> --clearsign > /dev/null` — `exit=0` means the key needs no passphrase and commits stay non-interactive; if it needs one, the user must type it in the pinentry dialog
+    - Restart the agent with the **system** gpgconf: `"/c/Program Files/GnuPG/bin/gpgconf.exe" --kill gpg-agent` (`gpg --kill` is not a valid option in 2.5.x)
     - As last resort, commit without signing: `git -c commit.gpgsign=false commit -m "..."` (unsigned; can amend-and-sign later)
 
 ## Conventional Commit Message Format
