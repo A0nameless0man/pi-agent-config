@@ -71,6 +71,7 @@ pi 核心工具仅包含 read / write / edit / bash,**没有 `task` 工具**。�
 -   **`steer_subagent`** — 向运行中的子Agent注入转向消息,无需重启
 -   **角色定义**:`~/.pi/agent/agents/*.md`(全局)/ `.pi/agents/*.md`(项目)/ `.agents/agents/*.md`,预置角色包括 `planner`(计划)、`reviewer`(审查)、`scout`(侦察)、`worker`(执行)、`visual`(视觉分析)、`visual-worker`(worker+visual,执行中主动用视觉,均多模态模型专属)、`Designer`(只读设计审查,产架构/受影响文件/风险/验证方案),另内置 `general-purpose` / `Explore` / `Plan`
 -   **并发**:后台子Agent默认 10 并发,现配 6,超出自动排队;`/agents` → Settings 可调整
+-   **超长 tool call 自动终止（重要陷阱）**:pi-subagents 会对子代理的超长阻塞式 tool call（实测单次 ≥30min）自动终止该子Agent——报错 "This operation was aborted"，状态误标 "STOPPED BY THE USER"（与用户无关、与 OOM 无关）。子代理内**禁止一次阻塞数十分钟的调用**；长时监视用短轮询模式：每轮 bash ≤10min（`sleep N` + `watchdog.sh check <label>` + `tail -1` 日志），循环直至 done/异常，被监测实验本体用 nohup 挂后台自行推进
 -   **上下文传递**:`Agent` 的 prompt 即任务交接文档,必须包含下方 目标 / 工作环境 / 约束条件 / 参考信息 四要素
 -   **管理命令**:`/agents` 交互菜单(查看运行中 agent、创建/编辑自定义 agent、调整并发/嵌套深度等)
 
