@@ -80,7 +80,7 @@ function makeEvent(outcome, errorMessage) {
 
 /** 状态栏首帧即本次请求的等待量 */
 function requestedWait(statuses) {
-	return statuses.find((s) => typeof s === "string" && s.includes("配额等待")) ?? "";
+	return statuses.find((s) => typeof s === "string" && /等待/.test(s)) ?? "";
 }
 
 async function run(settle, event, { abortAfter = false } = {}) {
@@ -115,6 +115,16 @@ test("非配额错误不等待", async () => {
 	assert.equal(requestedWait(statuses), "");
 });
 
+test("速率限制 1302 也走指数退避(30s 起),状态栏标注限流", async () => {
+	realClock();
+	const msg = '429: {"code":"1302","message":"您的账户已达到速率限制，请您控制请求频率"}';
+	const { statuses, notes } = await run(handlers.get("agent_before_settle"), makeEvent("error", msg), { abortAfter: true });
+	const wait = requestedWait(statuses);
+	assert.match(wait, /限流等待/);
+	assert.match(wait, /30s/);
+	assert.ok(notes.some(([type, text]) => type === "warning" && text.includes("限流触发")));
+});
+
 test("解析出的重置时刻超过 12h 预算,仍按 1h 一段等待", async () => {
 	const { result, statuses } = await run(handlers.get("agent_before_settle"), makeEvent("error", ZHIPU_1308(13 * 3600 * 1000)), {
 		abortAfter: true,
@@ -127,7 +137,8 @@ test("解析出的重置在 30 分钟后 → 等到那一刻(含 30s 缓冲)", a
 	const { statuses } = await run(handlers.get("agent_before_settle"), makeEvent("error", ZHIPU_1308(30 * 60 * 1000)), {
 		abortAfter: true,
 	});
-	assert.match(requestedWait(statuses), /30m30s/);
+	// 重置时刻串只到秒,当前时间的亚秒部分会引入 ±1s 抖动
+	assert.match(requestedWait(statuses), /30m(29|30)s/);
 });
 
 test("解析不出重置时刻 → 指数退避 30s / 1m / 2m,每次都续跑", async () => {

@@ -16,6 +16,12 @@
  * 剔除后投影不再以 assistant 结尾,`canContinue` 成立(commit 后 _refreshFinalizedContext
  * 会重设 agent.state.messages,continue 的前置校验也通过)。
  *
+ * 触发范围(两类都纳入,都用同一套指数退避):
+ * - 配额/账单耗尽(如智谱 1308"已达到 5 小时的使用上限"):错误体常带重置时刻,优先等到那一刻
+ * - 速率限制(如智谱 1302"已达到速率限制"):无重置时刻,走指数退避探测
+ * 分层理由:pi 自己已对 429 做 2s/4s/8s 三次快退避,瞬时抖动在那一层就消化了;
+ * 扩展接管的是"三次之后仍未恢复"的持续限流/耗尽,所以退避从 30s 起而非从 2s 起。
+ *
  * 等待策略(用户指定):
  * - 能解析出重置时刻 → 等到那一刻(智谱给的是北京时间 UTC+8,另加 RESET_BUFFER_MS 缓冲),
  *   **单次一律封顶 1h**:重置在 4h 后 → 分 4 段等待,每段结束探一次;重置在 24h 后 →
@@ -52,12 +58,19 @@ const BACKOFF_BASE_MS = 30 * 1000;
 // 配额/账单类耗尽的特征:命中即进入等待流程,否则交给 pi 原有行为
 const QUOTA_PATTERN =
 	/GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|\busage limit\b|\bbilling\b|使用上限|限额将在|额度.{0,6}(用尽|不足|已)|配额.{0,6}(用尽|不足|已)/i;
+// 账号级速率限制(智谱 1302"已达到速率限制"、通用 429 措辞)。
+// 顺序上先判 QUOTA:1308 之类可能同时含两侧措辞,归到配额更准确(有重置时刻可等)。
+const RATE_LIMIT_PATTERN = /已达到速率限制|速率限制|请求频率|账户或账号.{0,6}限制|too many requests|\brate.?limit/i;
+
+type ThrottleKind = "quota" | "rateLimit";
+const KIND_LABEL: Record<ThrottleKind, string> = { quota: "配额", rateLimit: "限流" };
 // 目前只有智谱在错误体里给出 "2026-09-24 18:23:28" 这种时刻
 const RESET_TIME_PATTERN = /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/;
 // 解析结果超出这个跨度就不信它(宁可走退避探测)
 const MAX_TRUSTED_RESET_SPAN_MS = 13 * 60 * 60 * 1000;
 
 interface QuotaEpisode {
+	kind: ThrottleKind;
 	waitedMs: number;
 	backoffIndex: number;
 	notified: boolean;
@@ -80,8 +93,10 @@ function findErroredAssistant(event: AgentBeforeSettleEvent): { entryId: string;
 	return { entryId: last.entryId, errorMessage: last.message.errorMessage ?? "" };
 }
 
-function isQuotaError(errorMessage: string): boolean {
-	return QUOTA_PATTERN.test(errorMessage);
+function classifyThrottle(errorMessage: string): ThrottleKind | null {
+	if (QUOTA_PATTERN.test(errorMessage)) return "quota";
+	if (RATE_LIMIT_PATTERN.test(errorMessage)) return "rateLimit";
+	return null;
 }
 
 /** 智谱给的是北京时间,固定按 UTC+8 解析;跨度不合理则视为解析失败。 */
@@ -119,11 +134,11 @@ function fmtDuration(ms: number): string {
 	return `${minutes}m${String(totalSeconds % 60).padStart(2, "0")}s`;
 }
 
-function renderWaitStatus(ctx: ExtensionContext, label: string, deadline: number, waitedMs: number): string {
+function renderWaitStatus(ctx: ExtensionContext, kind: ThrottleKind, label: string, deadline: number, waitedMs: number): string {
 	const theme = ctx.ui.theme;
 	const left = fmtDuration(Math.max(0, deadline - Date.now()));
 	return (
-		theme.fg("warning", "⏳ 配额等待 ") +
+		theme.fg("warning", `⏳ ${KIND_LABEL[kind]}等待 `) +
 		theme.fg("muted", `${label} · 还需 ${left}`) +
 		theme.fg("dim", ` · 已等 ${fmtDuration(waitedMs)}`)
 	);
@@ -154,7 +169,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * 返回 false 表示应放弃等待(Esc 中断 / ctx 已失效)。signal 一次性捕获,避免 await 期间
  * 反复读 ctx 触发 stale 断言(参考 openviking 扩展的 stale-ctx 补丁)。
  */
-async function waitForQuota(ms: number, ctx: ExtensionContext, label: string): Promise<boolean> {
+async function waitForQuota(ms: number, ctx: ExtensionContext, kind: ThrottleKind, label: string): Promise<boolean> {
 	let signal: AbortSignal | undefined;
 	try {
 		signal = ctx.signal;
@@ -166,7 +181,7 @@ async function waitForQuota(ms: number, ctx: ExtensionContext, label: string): P
 	const waitedBefore = episode?.waitedMs ?? 0;
 	const render = () => {
 		try {
-			ctx.ui.setStatus(STATUS_ID, renderWaitStatus(ctx, label, deadline, waitedBefore + (Date.now() - startedAt)));
+			ctx.ui.setStatus(STATUS_ID, renderWaitStatus(ctx, kind, label, deadline, waitedBefore + (Date.now() - startedAt)));
 		} catch {
 			// ctx 失效(会话被替换/重载):状态栏留给下一次重绘
 		}
@@ -215,9 +230,11 @@ function notify(ctx: ExtensionContext, text: string, type: "info" | "warning" = 
 function endEpisode(ctx: ExtensionContext, reason: "recovered" | "giveUp" | "other", waitedMs = 0): void {
 	const had = episode;
 	episode = null;
-	if (reason === "recovered" && had) notify(ctx, "配额已恢复,继续执行", "info");
-	if (reason === "giveUp" && had) {
-		notify(ctx, `配额等待已达上限(累计 ${fmtDuration(waitedMs)}),本轮按原错误结束`, "warning");
+	if (!had) return;
+	const label = KIND_LABEL[had.kind];
+	if (reason === "recovered") notify(ctx, `${label}已恢复,继续执行`, "info");
+	if (reason === "giveUp") {
+		notify(ctx, `${label}等待已达上限(累计 ${fmtDuration(waitedMs)}),本轮按原错误结束`, "warning");
 	}
 }
 
@@ -233,13 +250,14 @@ export default function (pi: ExtensionAPI) {
 			else clearWaitStatus(ctx);
 			return;
 		}
-		if (!isQuotaError(target.errorMessage)) {
-			// 非配额错误(网络/5xx/上下文超限等)不该在此等待
+		const kind = classifyThrottle(target.errorMessage);
+		if (!kind) {
+			// 非限流/配额错误(网络/5xx/上下文超限等)不该在此等待
 			if (episode) endEpisode(ctx, "other");
 			return;
 		}
 
-		episode ??= { waitedMs: 0, backoffIndex: 0, notified: false };
+		episode ??= { kind, waitedMs: 0, backoffIndex: 0, notified: false };
 		const current = episode;
 		const remainingBudget = MAX_TOTAL_WAIT_MS - current.waitedMs;
 		if (remainingBudget < MIN_PROBE_GAP_MS) {
@@ -267,13 +285,13 @@ export default function (pi: ExtensionAPI) {
 			current.notified = true;
 			notify(
 				ctx,
-				`配额耗尽,自动等待后继续(本次 ${fmtDuration(waitMs)},累计上限 ${fmtDuration(MAX_TOTAL_WAIT_MS)});按 Esc 可取消`,
+				`${KIND_LABEL[kind]}触发,自动等待后继续(本次 ${fmtDuration(waitMs)},累计上限 ${fmtDuration(MAX_TOTAL_WAIT_MS)});按 Esc 可取消`,
 				"warning",
 			);
 		}
 
 		const startedAt = Date.now();
-		const completed = await waitForQuota(waitMs, ctx, label);
+		const completed = await waitForQuota(waitMs, ctx, kind, label);
 		if (!completed) {
 			// Esc 或 ctx 失效:不续跑,本轮按原错误结束
 			endEpisode(ctx, "other");
