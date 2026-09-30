@@ -1,0 +1,114 @@
+// watchdog bg-task 调度器模板 —— js 只做调度与告警决策,检查逻辑在 check.sh
+// (templates/check.sh.tmpl)。用法:bg_task_start(script=本模板改 CFG 后全文)
+//
+// 通道原语(顶层裸函数):emit(信息级采样,零 token) / await alert({code,sev,msg,paths})
+// (唤醒 agent) / await sleep(ms) / await sh(cmd) / status() / recv()
+// 纪律:探针原始输出只留在沙箱内,永不进对话;告警 msg 只放短结论,大材料 paths 给路径。
+
+// ═══════════ 配置区(按实验改这里) ═══════════
+const CFG = {
+  label: "exp1",
+  log: "/tmp/exp1/train.log",            // 材料路径,告警里引用
+  pidFile: "/tmp/exp1/train.pid",        // 实验启动时 echo $$ > 写入
+  checkCmd: "WD_LOG=/tmp/exp1/train.log WD_PIDFILE=/tmp/exp1/train.pid " +
+            "WD_DONE_RE='Training complete|saved final' " +
+            "WD_FAIL_RE='Traceback \\(most recent call last\\)|CUDA out of memory|FATAL' " +
+            "bash /tmp/exp1/check.sh",   // 探针(复制 check.sh.tmpl 到实验目录并改配置)
+  expectSec: 3600,        // 期望时长:slow/timeout 判定基准
+  stallSec: 600,          // 日志停滞阈值(秒):超此值判 stalled;轮询周期自动取 min(pollSec, stallSec/2)
+  pollSec: 30,            // L1 轮询周期上限(秒)——机械探针便宜,固定密集,勿放宽
+  aiCmd: null,            // 可选 L2 智能巡检:sh() 跑 pi -p,输出约定第一行 VERDICT: OK/ABNORMAL
+  aiIntervalSec: 900,     // 巡检间隔(建议一刻钟到几小时量级);aiCmd=null 时忽略
+  reportPaths: [],        // 额外材料文件(指标历史等),终态报告与告警附上
+};
+// ═══════════ 轮询策略 ═══════════
+// L1 机械探针极便宜(每次 ~100ms)且 emit 零 token:固定密集轮询,不做宽化——
+// 宽曲线会让 poll 间隔超过停滞窗口而漏检(实测盲区)。轮询周期 = min(pollSec, stallSec/2),
+// 保证 stallSec 级停滞在 pollSec+stallSec 内必被发现。
+// 昂贵的 L2 智能巡检(aiCmd)仍按 aiIntervalSec 独立触发,不受此影响。
+const POLL_SEC = Math.min(CFG.pollSec || 30, Math.max(5, Math.floor(CFG.stallSec / 2)));
+const L2_PCT = [0.2, 0.5, 0.8, 1.1, 1.5];      // L2 检查点(期望时长百分比)
+
+const T0 = Date.now();
+let stalled = false, slowAlerted = false, timeoutAlerted = false, plateauAlerted = false;
+let l2Idx = 0, lastAi = 0;
+const metrics = [];                              // plateau 检测:最近 10 个指标点
+
+while (true) {
+  const r = await sh(CFG.checkCmd);
+  let v = {};
+  try {
+    const lines = (r.output || "").trim().split("\n").filter(Boolean);
+    v = JSON.parse(lines[lines.length - 1]);
+  } catch (e) { /* 探针输出异常不致命,emit 后继续 */ }
+  const elapsed = Math.round((Date.now() - T0) / 1000);
+  emit({ data: { el: elapsed, alive: v.alive, age: v.log_age_s, done: v.done, fail: v.fail } });
+
+  // ── 终态三判定(唯一 return 出口) ──
+  if (v.fail) {
+    await alert({ code: "experiment_failed", sev: "critical", msg: CFG.label + " hit fail signal, last: " + (v.last || "?"), paths: [CFG.log, ...CFG.reportPaths] });
+    return "monitor finished: FAIL signal, elapsed " + elapsed + "s, last=" + (v.last || "?");
+  }
+  if (v.done) {
+    await alert({ code: "experiment_done", sev: "info", msg: CFG.label + " hit done signal: " + (v.last || "?"), paths: [CFG.log, ...CFG.reportPaths] });
+    return "monitor finished: DONE, elapsed " + elapsed + "s, last=" + (v.last || "?");
+  }
+  if (v.alive === false) {
+    await alert({ code: "process_dead", sev: "critical", msg: CFG.label + " process exited without done/fail signal, last: " + (v.last || "?"), paths: [CFG.log, ...CFG.reportPaths] });
+    return "monitor finished: process dead without verdict, elapsed " + elapsed + "s";
+  }
+
+  // ── 停滞(状态机:触发一次,恢复发 note,可再触发) ──
+  if (typeof v.log_age_s === "number" && v.log_age_s > CFG.stallSec && !stalled) {
+    stalled = true;
+    await alert({ code: "output_stalled", sev: "warn", msg: CFG.label + ": no log output for " + v.log_age_s + "s (threshold " + CFG.stallSec + "s)", paths: [CFG.log] });
+  } else if (typeof v.log_age_s === "number" && v.log_age_s < Math.min(60, CFG.stallSec / 4) && stalled) {
+    stalled = false;
+    emit({ data: { note: "stall episode ended at el=" + elapsed } });
+  }
+
+  // ── 慢/超时(1.2× 警告一次;2× critical 一次) ──
+  if (!slowAlerted && elapsed > CFG.expectSec * 1.2) {
+    slowAlerted = true;
+    await alert({ code: "slow", sev: "warn", msg: CFG.label + " exceeded 1.2x expect (" + CFG.expectSec + "s), now " + elapsed + "s", paths: [CFG.log] });
+  }
+  if (!timeoutAlerted && elapsed > CFG.expectSec * 2) {
+    timeoutAlerted = true;
+    await alert({ code: "timeout_2x", sev: "critical", msg: CFG.label + " exceeded 2x expect, now " + elapsed + "s — decide: extend or kill", paths: [CFG.log, ...CFG.reportPaths] });
+  }
+
+  // ── 指标平台期(最近 10 点相对变化 <0.1%) ──
+  const m = parseFloat(v.metric);
+  if (Number.isFinite(m)) {
+    metrics.push(m);
+    if (metrics.length > 10) metrics.shift();
+    if (!plateauAlerted && metrics.length === 10) {
+      const spread = Math.abs(metrics[9] - metrics[0]);
+      const scale = Math.max(Math.abs(metrics[0]), 1e-12);
+      if (spread / scale < 0.001) {
+        plateauAlerted = true;
+        await alert({ code: "plateau", sev: "warn", msg: CFG.label + " metric plateaued (last 10 pts rel change <0.1%, now " + m + ") — consider early stop", paths: [CFG.log, ...CFG.reportPaths] });
+      } else if (spread / scale > 0.01) {
+        plateauAlerted = false;             // 明显变化后重新武装
+      }
+    }
+  }
+
+  // ── L2 检查点(emit 供编排参考)与可选智能巡检 ──
+  if (l2Idx < L2_PCT.length && elapsed >= CFG.expectSec * L2_PCT[l2Idx]) {
+    emit({ data: { l2_due: L2_PCT[l2Idx], at: elapsed } });
+    l2Idx++;
+  }
+  if (CFG.aiCmd && (Date.now() - lastAi) / 1000 >= CFG.aiIntervalSec && !stalled) {
+    lastAi = Date.now();
+    const ai = await sh(CFG.aiCmd);        // 巡检输出只留沙箱,只判 VERDICT
+    const out = (ai.output || "").trim().split("\n");
+    const verdict = out.find((l) => l.indexOf("VERDICT:") === 0) || "";
+    emit({ data: { ai_at: elapsed, verdict: verdict.slice(0, 200) } });
+    if (/VERDICT:\s*(ABNORMAL|FAIL|ANOMALY)/.test(verdict)) {
+      await alert({ code: "ai_alert", sev: "critical", msg: CFG.label + " L2 inspection abnormal: " + verdict.slice(0, 300), paths: [CFG.log, ...CFG.reportPaths] });
+    }
+  }
+
+  await sleep(POLL_SEC * 1000);
+}

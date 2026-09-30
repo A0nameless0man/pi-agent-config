@@ -158,7 +158,7 @@ bg-task 模型取消阻塞后,子代理 `task_start` 完就会返回,pi-subagent
 3. Windows 本机端到端——**已完成(2026-09-30 现实化场景)**:被监视实验进程(nohup 独立)+ bash check 脚本(PID kill -0 + 日志 mtime)+ js 调度器驱动;30s 进度→45s 停滞→恢复→退出。结果:stalled 告警 22s 阈值精确触发(带 paths)、agent tail 核实材料、exit 告警、terminal 收尾;全程 agent 仅 ~5 次工具调用,静默期零 provider request,探针输出未进对话(注入边界实证)。**两条工效教训(watchdog 模板必须继承)**:①headless 复杂多步流程须主力档模型——flash 档无视逐字指令自由发挥(自写脚本、手动探针、调不存在的命令)烧穿 300s;②本机 Git Bash 无 procps(pgrep/pkill 不存在),探针零依赖方案 = PID 文件 + kill -0(纯 bash 内建),禁用 pgrep/pkill/ps。
 4. **30min 约束解除——纯配置方案(用户 2026-09-30 定案,不改 GLA 源码)**:全局 `~/.pi/agent/pi-goal-list-loop-audit.settings.json` 写 `"subagentHangEscalationMinutes": 0`(已于同日生效)。代价接受:①全机失去 hang 自动 abort(5min 检测警告保留,作为人工/主会话介入信号——回到"检测+提示、不自动杀"的原始哲学);②join 静默 >5min 起每 5min 一条警告噪音(ui.notify + ledger),静默 12h ≈ 144 条,接受。若未来噪音不可忍受,再评估 join 默认加 ~4min 超时轮换(每轮 toolUses+1 重置检测,代价 1 provider request/轮)或重启 GLA 豁免功能议题。
 5. **真实试用**(用户指示):日常实验监视场景实际使用一段时间,暴露协议/工效问题。
-6. watchdog skill 重写为薄层(§4)——**在试用验证 bg-task 可靠之后**:简单存活/健康 check + 参考 js 调度器模板 + bash check 模板 + 子代理 prompt 模板(含授权链提醒,§4) + 调度原则文档;watchdog.sh 退役。
+6. watchdog skill 重写为薄层——**已完成(2026-09-30,用户提前指令跳过试用等待)**:templates/{check.sh.tmpl, scheduler.js.tmpl, subagent-prompt.md.tmpl} + SKILL.md 重写;watchdog.sh 退役(git rm)。四轮 headless 验收通过(done/stall/材料 paths/CFG 适配)。**验收发现并修复设计缺陷**:L1 宽曲线(开始密后续宽)与停滞检测矛盾——宽化后 poll 间隔超过停滞窗口即漏检(40s 停滞被 90s 间隔跳过,实测);事件驱动模型下机械探针极便宜(emit 零 token),改为固定密集轮询 min(pollSec, stallSec/2),宽曲线仅保留给昂贵的 L2 智能巡检。
 7. 子代理拓扑端到端:多实验并发,完成通知时序正确、GLLA 豁免生效、steer 入队即退 join。
 8. Linux 机器升级 pi + GLLA 后铺开。
 

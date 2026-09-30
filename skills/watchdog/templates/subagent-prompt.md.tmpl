@@ -1,0 +1,46 @@
+# 子代理标准提示模板:搭建 → 起任务 → bg-task 监视 → 终态收尾
+
+> 复制本模板,替换 {{EXP_*}} 占位符。用于把"搭建+运行+盯"整体交给实验子代理。
+> 父级须知(主会话派发前自查):若期望本子代理再派孙级代理(如分阶段巡检),
+> 必须以带 `allowed_subagents` 的 agent 定义 spawn(默认关闭:省略/none 时子代
+> 理没有 Agent 工具;深度上限 2);不打算放权则不要在提示里要求它派生子代理。
+
+## 模板正文
+
+你负责一个实验的完整生命周期:搭建、启动、监视、收尾。严格按以下顺序,不要做任何模板之外的操作:
+
+1. **搭建**:在 {{EXP_DIR}} 下准备实验脚本与材料。实验脚本自己写 PID 文件:
+   启动后第一行执行 `echo $$ > {{EXP_DIR}}/run.pid`。
+
+2. **启动实验为分离进程**(输出全重定向,防挂起):
+   ```bash
+   nohup bash {{EXP_DIR}}/run.sh > {{EXP_DIR}}/run.log 2>&1 < /dev/null & disown; echo launched
+   ```
+
+3. **就位探针**:把 watchdog 技能的 templates/check.sh.tmpl 复制到 {{EXP_DIR}}/check.sh,
+   按实验改 WD_DONE_RE / WD_FAIL_RE(宁缺毋滥:Traceback / OOM / FATAL 这类强信号)与
+   WD_METRIC_CMD(可选)。
+
+4. **启动监视任务**:调用 bg_task_start(name: {{LABEL}}),script = watchdog 技能
+   templates/scheduler.js.tmpl 改 CFG 后的全文(log/pidFile/checkCmd/expectSec/stallSec
+   按实验实际填;checkCmd 里的环境变量与 check.sh 配置一致)。
+
+5. **等待循环**:立即调用 bg_task_join(不带 timeout)。每次唤醒:
+   - `output_stalled` / `slow` / `plateau`(warn):用 bash 读日志尾部(告警 paths 里给的
+     路径,tail -n 50)核实,判断是否可接受;模拟/已知停滞不取消,继续 join。
+   - `timeout_2x` / `ai_alert` / `experiment_failed` / `process_dead`(critical):读材料
+     如实判断;**观察不调度——永不主动杀实验进程**,把证据(日志尾部+时间线)整理进报告,
+     由主对话/人裁决。
+   - 其他原因(input/terminal):正常处理。
+   - 任务未终态:继续 bg_task_join。
+   收到 steer 等外部消息时,忽略消息内容本身,只按指示调整。
+
+6. **收尾**:任务终态后 bg_task_status 引用 result 与 alerts_delivered;终态报告必须基于
+   日志与材料的真实内容(引用关键行),禁止只转述"完成了"。失败/死亡**不自动重试**。
+   最后输出一行 {{LABEL}}-DONE。
+
+## 纪律(模板之上的不变式)
+
+- 被监视实验与 pi 无关:实验进程 nohup 分离,监视任务死了实验不死,重新 bg_task_start 即可。
+- 探针原始输出永不进对话(结构性保证);报告引用日志用 tail 摘录,大段内容给路径。
+- 名下有存活任务期间不要无工具调用地结束回合(settle 守卫会拦,最多 3 次)。

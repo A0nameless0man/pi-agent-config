@@ -1,0 +1,42 @@
+#!/bin/bash
+# watchdog L1 机械探针模板(bg-task 版,零外部依赖)
+#
+# 契约:每次调用输出恰好一行 JSON 判定,退出码恒 0——异常与否由 js 调度器
+# (templates/scheduler.js.tmpl)判定,本脚本只报告事实。
+#
+# 配置经环境变量注入(由调度器 sh() 调用时给出):
+#   WD_LOG        必填  实验日志路径(进度信号以日志增长/新鲜度为准)
+#   WD_PIDFILE    必填  实验进程 PID 文件(实验启动时 echo $$ > pidfile)
+#   WD_DONE_RE    可选  完成信号正则(grep -E)。宁缺毋滥:'Training complete|saved final'
+#   WD_FAIL_RE    可选  失败信号正则。宁缺毋滥:'Traceback \(most recent call last\)|CUDA out of memory|FATAL'
+#   WD_METRIC_CMD 可选  输出最新指标数值的命令(如: tail -n1 metrics.jsonl | jq -r .loss)
+#   WD_TAIL_N     可选  正则扫描的日志尾部行数(默认 200)
+#
+# 依赖纪律:本机 Git Bash 无 procps(pgrep/pkill/ps 均不存在),存活判定一律
+# kill -0(PID 文件)+ 日志 mtime(stat -c %Y),禁止引入其它进程工具。
+# 输出字符串统一单引号化,防 JSON 注入。
+
+set -u
+LOG="${WD_LOG:?WD_LOG required}"
+PIDF="${WD_PIDFILE:?WD_PIDFILE required}"
+TAIL_N="${WD_TAIL_N:-200}"
+
+PID=$(cat "$PIDF" 2>/dev/null || true)
+ALIVE=false
+if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then ALIVE=true; fi
+
+TAIL=$(tail -n "$TAIL_N" "$LOG" 2>/dev/null || true)
+DONE_HIT=false
+FAIL_HIT=false
+METRIC=""
+if [ -n "${WD_DONE_RE:-}" ] && printf '%s\n' "$TAIL" | grep -Eq "$WD_DONE_RE"; then DONE_HIT=true; fi
+if [ -n "${WD_FAIL_RE:-}" ] && printf '%s\n' "$TAIL" | grep -Eq "$WD_FAIL_RE"; then FAIL_HIT=true; fi
+if [ -n "${WD_METRIC_CMD:-}" ]; then METRIC=$(eval "$WD_METRIC_CMD" 2>/dev/null | tail -n 1 || true); fi
+
+LAST_TS=$(stat -c %Y "$LOG" 2>/dev/null || echo 0)
+AGE=$(( $(date +%s) - LAST_TS ))
+LAST=$(tail -n 1 "$LOG" 2>/dev/null | sed "s/\"/'/g")
+METRIC=$(printf '%s' "$METRIC" | sed "s/\"/'/g")
+
+printf '{"alive":%s,"done":%s,"fail":%s,"log_age_s":%d,"metric":"%s","last":"%s"}\n' \
+  "$ALIVE" "$DONE_HIT" "$FAIL_HIT" "$AGE" "$METRIC" "$LAST"
