@@ -105,6 +105,9 @@ export default function bgTaskExtension(pi: ExtensionAPI) {
     // settle 守卫状态
     let guardVetoes = 0;
     let guardArmed = true;
+    // 本 turn 内已有输入入队的时刻(joint 注册时消费;turn_start 清除)——
+    // 修复 steer 在 join 注册前间隙到达导致唤醒信号丢失的竞态
+    let inputPendingSince: number | undefined;
 
     function ensureSession(ctx: ExtensionContext): Map<string, TaskRecord> {
         const sid = ctx.sessionManager.getSessionId();
@@ -419,6 +422,15 @@ export default function bgTaskExtension(pi: ExtensionAPI) {
                 }
             }
             const watched = new Set(alive.map((t) => t.id));
+            // 消费 pending 输入标志:本 turn 已有 steer/followUp 入队(在 join 注册前的间隙到达),
+            // 它们会在本轮工具批结束后才投递——立即返回让路,而不是阻塞 120s 把 steer 卡死在队列里
+            if (inputPendingSince !== undefined) {
+                inputPendingSince = undefined;
+                return {
+                    content: [{ type: "text", text: formatJoinResult("input", [], tasks) }],
+                    details: { reason: "input", alerts: [] },
+                };
+            }
             const wakeReason = await new Promise<string>((resolve) => {
                 const wait: JoinWait = { watched, minSev, resolve, startedAt: Date.now() };
                 activeJoin = wait;
@@ -473,11 +485,19 @@ export default function bgTaskExtension(pi: ExtensionAPI) {
     // -------------------------------------------------------------------------
 
     pi.on("input", () => {
+        // 不只唤醒当前 join:置 pending 标志。steer 可能在 join 注册前到达
+        // (两个工具调用之间的间隙),那时无 join 可唤;标志由 join 注册时消费,
+        // 由 turn_start 清除(已进入上下文送达的输入不再算 pending)
+        inputPendingSince = Date.now();
         if (activeJoin) {
             const j = activeJoin;
             activeJoin = undefined;
             j.resolve("input");
         }
+    });
+
+    pi.on("turn_start", () => {
+        inputPendingSince = undefined;
     });
 
     pi.on("tool_execution_end", () => {
