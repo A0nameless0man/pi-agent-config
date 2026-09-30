@@ -43,3 +43,4 @@ __pycache__/
 Thumbs.db
 *.swp
 .bg-task/
+pi-goal-list-loop-audit.settings.json
