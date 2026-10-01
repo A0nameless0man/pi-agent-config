@@ -178,12 +178,32 @@ test("run 中途成功响应(含 tool call)经 turn_end 把退避档位归零", 
 	const second = await run(handlers.get("agent_before_settle"), makeEvent("error", noReset));
 	assert.match(requestedWait(second.statuses), /1m00s/);
 
-	// 中途一次成功响应(比如探测结果带 tool call,run 在低层循环继续,不经 settle)
-	await run(handlers.get("turn_end"), makeTurnEnd("completed"));
+	// 中途一次成功响应(比如探测结果带 tool call,run 在低层循环继续,不经 settle);
+	// 恢复通知也在此发出,不等 settle
+	const mid = await run(handlers.get("turn_end"), makeTurnEnd("completed"));
+	assert.ok(mid.notes.some(([, text]) => text.includes("已恢复")), "turn_end 成功应报恢复");
 
 	// 再吃 429:应从 30s 重新起步,而不是 2m
 	const third = await run(handlers.get("agent_before_settle"), makeEvent("error", noReset));
 	assert.match(requestedWait(third.statuses), /30s/);
+});
+
+test("恢复通知跟随首次成功请求(turn_end),settle 不重复", async () => {
+	speedUp();
+	await run(handlers.get("agent_before_settle"), makeEvent("completed", undefined)); // 清残留 episode
+
+	const noReset = "429: insufficient_quota";
+	const first = await run(handlers.get("agent_before_settle"), makeEvent("error", noReset));
+	assert.ok(first.notes.some(([, text]) => text.includes("触发")), "episode 开始应报触发");
+
+	const mid = await run(handlers.get("turn_end"), makeTurnEnd("completed"));
+	assert.ok(mid.notes.some(([, text]) => text.includes("已恢复")));
+
+	// 后续成功(含 settle 收尾)不再重复报恢复
+	const mid2 = await run(handlers.get("turn_end"), makeTurnEnd("completed"));
+	assert.ok(!mid2.notes.some(([, text]) => text.includes("已恢复")));
+	const end = await run(handlers.get("agent_before_settle"), makeEvent("completed", undefined));
+	assert.ok(!end.notes.some(([, text]) => text.includes("已恢复")), "settle 不应重复报恢复");
 });
 
 test("12h 累计预算自最后一次成功请求起算:turn_end 成功可持续续命", async () => {
@@ -201,7 +221,7 @@ test("12h 累计预算自最后一次成功请求起算:turn_end 成功可持续
 });
 
 test("续跑载荷 = 剔除失败消息的 context_edit + continue;恢复后清空累计", async () => {
-	// 先结束上一轮 episode,让本轮重新提示
+	// 先结束上一轮 episode,让本轮重新提示(settle 收尾路径的恢复通知未被打过时照发)
 	await run(handlers.get("agent_before_settle"), makeEvent("completed", undefined));
 
 	const { result, statuses, notes } = await run(handlers.get("agent_before_settle"), makeEvent("error", ZHIPU_1308(20 * 1000)));

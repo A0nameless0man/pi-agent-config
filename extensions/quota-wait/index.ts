@@ -45,7 +45,9 @@
  * outcome === "completed" 的 turn_end(每次 LLM 成功响应,含 tool call 中间轮、含 pi
  * 内部重试成功的那次),都把 backoffIndex 与 waitedMs 一并归零(用户指定):12h 预算
  * 自最后一次成功请求起算,成功/429 高频交替时预算可被持续续命——预算真正防的是
- * "期间无任何成功的持续等待"无限延长。
+ * "期间无任何成功的持续等待"无限延长。恢复通知也跟随首次成功请求:turn_end 即报
+ * "XX已恢复,继续执行",不等 settle;一次 episode 只报一对触发/恢复,settle 端
+ * 看到 recoveryNotified 就不再重复。
  *
  * 测试:node --test extensions/quota-wait/tests/quota-wait.test.mjs(虚拟时钟压缩等待)
  */
@@ -83,6 +85,8 @@ interface QuotaEpisode {
 	waitedMs: number;
 	backoffIndex: number;
 	notified: boolean;
+	/** 恢复通知已发过(turn_end 首次成功时报);settle 端据此去重 */
+	recoveryNotified: boolean;
 }
 
 let episode: QuotaEpisode | null = null;
@@ -235,13 +239,13 @@ function notify(ctx: ExtensionContext, text: string, type: "info" | "warning" = 
 	}
 }
 
-/** 结束本轮 episode;成功恢复时给一条提示。 */
+/** 结束本轮 episode;成功恢复时给一条提示(turn_end 首次成功时已报过则不重复)。 */
 function endEpisode(ctx: ExtensionContext, reason: "recovered" | "giveUp" | "other", waitedMs = 0): void {
 	const had = episode;
 	episode = null;
 	if (!had) return;
 	const label = KIND_LABEL[had.kind];
-	if (reason === "recovered") notify(ctx, `${label}已恢复,继续执行`, "info");
+	if (reason === "recovered" && !had.recoveryNotified) notify(ctx, `${label}已恢复,继续执行`, "info");
 	if (reason === "giveUp") {
 		notify(ctx, `${label}等待已达上限(累计 ${fmtDuration(waitedMs)}),本轮按原错误结束`, "warning");
 	}
@@ -266,7 +270,7 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		episode ??= { kind, waitedMs: 0, backoffIndex: 0, notified: false };
+		episode ??= { kind, waitedMs: 0, backoffIndex: 0, notified: false, recoveryNotified: false };
 		const current = episode;
 		const remainingBudget = MAX_TOTAL_WAIT_MS - current.waitedMs;
 		if (remainingBudget < MIN_PROBE_GAP_MS) {
@@ -317,9 +321,13 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// turn_end 在每次 LLM 响应后触发(含带 tool call 的中间轮);成功响应即限流放开的证据,
-	// 退避档位与累计预算一并归零。理由见文件头"退避档位与累计预算共用同一层细粒度重置"一段。
-	pi.on("turn_end", (event) => {
+	// 退避档位与累计预算一并归零,恢复通知也在此发出(去重见文件头)。
+	pi.on("turn_end", (event, ctx) => {
 		if (event.outcome === "completed" && episode) {
+			if (!episode.recoveryNotified) {
+				episode.recoveryNotified = true;
+				notify(ctx, `${KIND_LABEL[episode.kind]}已恢复,继续执行`, "info");
+			}
 			episode.backoffIndex = 0;
 			episode.waitedMs = 0;
 		}
