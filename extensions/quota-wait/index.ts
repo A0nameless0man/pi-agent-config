@@ -38,6 +38,15 @@
  * 统计口径:一轮"配额 episode"= 从第一次配额错误到下一次非错误 settle。任何一次成功
  * settle(agent_before_settle 的 outcome !== "error")都会清空累计等待时长。
  *
+ * 退避档位与累计预算共用同一层细粒度重置(turn_end):agent_before_settle 是整轮收尾边界,
+ * 只在无重试、无压缩、无排队消息时触发;带 tool call 的成功响应只触发 turn_end,run 在低层循环里
+ * 继续跑。若只在 settle 层重置,"探测成功(返回 tool call)→ 紧接着的请求又 429"会让
+ * 退避跨成功响应一路翻倍(30s→1m→2m→…),而成功本身已证明限流放开。因此凡收到
+ * outcome === "completed" 的 turn_end(每次 LLM 成功响应,含 tool call 中间轮、含 pi
+ * 内部重试成功的那次),都把 backoffIndex 与 waitedMs 一并归零(用户指定):12h 预算
+ * 自最后一次成功请求起算,成功/429 高频交替时预算可被持续续命——预算真正防的是
+ * "期间无任何成功的持续等待"无限延长。
+ *
  * 测试:node --test extensions/quota-wait/tests/quota-wait.test.mjs(虚拟时钟压缩等待)
  */
 
@@ -45,7 +54,7 @@ import type { AgentBeforeSettleEvent, ExtensionAPI, ExtensionContext } from "@ea
 
 const STATUS_ID = "quota-wait";
 
-// 预算(用户指定:单次最多 1h,总最多 12h)
+// 预算(用户指定:单次最多 1h,总最多 12h;12h 自最后一次成功请求起算,见 turn_end 重置)
 const MAX_SINGLE_WAIT_MS = 60 * 60 * 1000;
 const MAX_TOTAL_WAIT_MS = 12 * 60 * 60 * 1000;
 // 重置时刻之后留的缓冲:避免钟差导致刚好卡在边界再吃一个 429
@@ -305,6 +314,15 @@ export default function (pi: ExtensionAPI) {
 			entries: [{ type: "context_edit" as const, targetId: target.entryId, replacement: null }],
 			continue: true,
 		};
+	});
+
+	// turn_end 在每次 LLM 响应后触发(含带 tool call 的中间轮);成功响应即限流放开的证据,
+	// 退避档位与累计预算一并归零。理由见文件头"退避档位与累计预算共用同一层细粒度重置"一段。
+	pi.on("turn_end", (event) => {
+		if (event.outcome === "completed" && episode) {
+			episode.backoffIndex = 0;
+			episode.waitedMs = 0;
+		}
 	});
 
 	pi.on("session_shutdown", (_event, ctx) => {

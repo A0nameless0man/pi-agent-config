@@ -78,6 +78,19 @@ function makeEvent(outcome, errorMessage) {
 	};
 }
 
+/** turn_end 事件(handler 只读 outcome,其余字段给最小形状) */
+function makeTurnEnd(outcome) {
+	return {
+		type: "turn_end",
+		turnIndex: 0,
+		message: { role: "assistant", stopReason: "stop", content: [] },
+		toolResults: [],
+		messageEntryId: "a1",
+		toolResultEntryIds: [],
+		outcome,
+	};
+}
+
 /** 状态栏首帧即本次请求的等待量 */
 function requestedWait(statuses) {
 	return statuses.find((s) => typeof s === "string" && /等待/.test(s)) ?? "";
@@ -97,8 +110,9 @@ async function run(settle, event, { abortAfter = false } = {}) {
 
 const handlers = installHandlers();
 
-test("注册 agent_before_settle 与 session_shutdown", () => {
+test("注册 agent_before_settle / turn_end 与 session_shutdown", () => {
 	assert.equal(typeof handlers.get("agent_before_settle"), "function");
+	assert.equal(typeof handlers.get("turn_end"), "function");
 	assert.equal(typeof handlers.get("session_shutdown"), "function");
 });
 
@@ -152,6 +166,38 @@ test("解析不出重置时刻 → 指数退避 30s / 1m / 2m,每次都续跑", 
 	assert.match(seen[0], /30s/);
 	assert.match(seen[1], /1m00s/);
 	assert.match(seen[2], /2m00s/);
+});
+
+test("run 中途成功响应(含 tool call)经 turn_end 把退避档位归零", async () => {
+	speedUp();
+	await run(handlers.get("agent_before_settle"), makeEvent("completed", undefined)); // 清残留 episode
+
+	const noReset = "429: insufficient_quota";
+	// 连续两次退避:30s → 1m
+	await run(handlers.get("agent_before_settle"), makeEvent("error", noReset));
+	const second = await run(handlers.get("agent_before_settle"), makeEvent("error", noReset));
+	assert.match(requestedWait(second.statuses), /1m00s/);
+
+	// 中途一次成功响应(比如探测结果带 tool call,run 在低层循环继续,不经 settle)
+	await run(handlers.get("turn_end"), makeTurnEnd("completed"));
+
+	// 再吃 429:应从 30s 重新起步,而不是 2m
+	const third = await run(handlers.get("agent_before_settle"), makeEvent("error", noReset));
+	assert.match(requestedWait(third.statuses), /30s/);
+});
+
+test("12h 累计预算自最后一次成功请求起算:turn_end 成功可持续续命", async () => {
+	speedUp();
+	await run(handlers.get("agent_before_settle"), makeEvent("completed", undefined)); // 清残留 episode
+
+	// 每次错误前都注入一次成功响应:预算应被续命,永不放弃;
+	// 若预算不重置,累计在 ~8 次迭代(每次实耗约 1.7h)就触达 12h 上限而放弃
+	for (let i = 0; i < 10; i += 1) {
+		await run(handlers.get("turn_end"), makeTurnEnd("completed"));
+		const { result, notes } = await run(handlers.get("agent_before_settle"), makeEvent("error", ZHIPU_1308(13 * 3600 * 1000)));
+		assert.equal(result?.continue, true, `迭代 ${i}:预算应已被成功请求续命`);
+		assert.ok(!notes.some(([, text]) => text.includes("已达上限")));
+	}
 });
 
 test("续跑载荷 = 剔除失败消息的 context_edit + continue;恢复后清空累计", async () => {
