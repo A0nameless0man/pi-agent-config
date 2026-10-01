@@ -413,7 +413,7 @@ cargo build --release 2>&1 | tee /tmp/build.log
 | 任务特征 | 推荐 |
 |---|---|
 | 1-5 个独立任务 | pi-subagents `Agent` 工具（可后台并行 + steering） |
-| **6+ 个同类独立任务** | pi-subagents `SubagentWorkflow`（分批 wave，pilot 门控） |
+| **6+ 个同类独立任务** | pi-subagents `SubagentWorkflow`（信号量限流，pilot 门控） |
 | **静态依赖**（B 必须在 A 后但范围预设） | `SubagentWorkflow` 的 `pipeline` / phase 编排 |
 | **动态依赖**（B 的范围由 A 的结果决定） | pi-subagents 串行（强制） |
 | 子任务需向父 agent 问澄清 | pi-subagents 串行（强制） |
