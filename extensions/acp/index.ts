@@ -15,7 +15,14 @@
  *   ✅ 用量提示:自然边界触发(agent 一轮结束 / todo 完成 / 硬限兜底),
  *      目标控制带 180K~250K(用户偏好),瞬态注入不污染 session —— 用户偏好)
  *   ✅ decompress 工具(停用块→消息重现)
- *   ⏳ 二期:GC old-gen 合并、质量门控、KEEP/REF 标记、tier 2/3 蒸馏
+ *   ✅ tier 2/3 蒸馏(2026-10-02 二期):compress 的 startId/endId 也接受块引用
+ *      bN..bM → 旧块折叠成更高层摘要(tier-1→2→3,"散文上的 LSM 树"),consumed 块
+ *      停用但保留谱系(effectiveMessageIds 传递闭包),decompress 上翻一代
+ *   ✅ 锚点隐藏:被消费块的摘要承载(compress 调用 assistant 消息 + toolResult)
+ *      随消费一起隐藏,decompress 自动恢复 —— 派生规则,不落盘
+ *   ✅ search_context 工具(2026-10-02 二期):块摘要 + 被折叠原文的零成本关键词
+ *      召回(hybrid: 0.7×BM25 + 0.3×char-bigram,CJK 分词感知,不改任何状态)
+ *   ⏳ 三期:GC old-gen 合并、质量门控、KEEP/REF 标记、acp_status、/acp 命令
  *
  * pi ≥0.99 兼容(2026-09-30 修复):session 现在把 system prompt 也存为 message entry
  * (role=system),且 compaction/branch_summary entry 会展开出 compactionSummary /
@@ -35,6 +42,7 @@ const REF_WIDTH = 5;
 const ID_TAG_OPEN = `<acp-id>`;
 const ID_TAG_CLOSE = `</acp-id>`;
 const REF_RE = /^m(\d{1,5})$/;
+const BLOCK_REF_RE = /^b(\d+)$/;
 
 // ---- 用量提示(自然边界触发,用户偏好:控制带 180K~250K,不要频繁 nudge)----
 // 软限:超过后在自然边界(agent 一轮结束/todo 完成)提示;目标:提示里让模型压到这儿
@@ -55,6 +63,10 @@ function envInt(name: string, dflt: number): number {
 	return dflt;
 }
 const PROTECT_RECENT_N = 3; // 保护最近 N 条消息不被压缩
+// nudge 中蒸馏建议的活跃块数下限(安全阀定位:tier-2 蒸馏是长会话封顶手段而非常规路径,
+// 参考论文结论"块数不是需求信号"——只挂在已超软限的提示里,不做独立触发)
+const TIER2_HINT_MIN = 4;
+const TIER3_HINT_MIN = 3;
 
 // ============ 类型 ============
 interface CompressionBlock {
@@ -65,13 +77,17 @@ interface CompressionBlock {
 	directMessageIds: string[]; // pi entry ids
 	effectiveMessageIds: string[];
 	consumedBlockIds: number[];
-	anchorToolCallId: string; // compress 工具调用的 toolCallId
+	anchorToolCallId: string; // compress 工具调用的 toolCallId(摘要的 in-band 承载锚点)
 	summary: string;
 	summaryTokens: number;
 	topic?: string;
 	startRef: string;
 	endRef: string;
 	createdAt: number;
+	coveredTokens?: number; // 被覆盖原始消息的 token 估算(统计与搜索展示;旧状态缺省=0)
+	// 停用原因:"consumed"=被更高层块蒸馏(锚点隐藏);"decompress"=用户停用(锚点保留);
+	// undefined=从未停用或旧版本状态(视为 decompress 语义,锚点保留)
+	deactivatedBy?: "consumed" | "decompress";
 }
 
 interface PrunedMessageEntry {
@@ -152,11 +168,25 @@ function reviveState(data: any, sid: string): SessionState {
 	// 容错恢复:只取认识的字段
 	const p = data?.prune ?? {};
 	const n = data?.nudge ?? {};
+	// blocksById 补齐二期新字段(JSON round-trip 后键为字符串,数值访问天然兼容)
+	const blocksById: Record<number, CompressionBlock> = {};
+	for (const [k, v] of Object.entries(p.blocksById ?? {})) {
+		const bid = Number(k);
+		if (!Number.isFinite(bid) || !v || typeof v !== "object") continue;
+		blocksById[bid] = {
+			...(v as CompressionBlock),
+			coveredTokens: typeof (v as any).coveredTokens === "number" ? (v as any).coveredTokens : 0,
+			deactivatedBy:
+				(v as any).deactivatedBy === "consumed" || (v as any).deactivatedBy === "decompress"
+					? (v as any).deactivatedBy
+					: undefined,
+		};
+	}
 	return {
 		sessionId: sid,
 		prune: {
 			byMessageId: p.byMessageId ?? {},
-			blocksById: p.blocksById ?? {},
+			blocksById,
 			activeBlockIds: Array.isArray(p.activeBlockIds) ? p.activeBlockIds : [],
 			nextBlockId: typeof p.nextBlockId === "number" ? p.nextBlockId : 1,
 			nextRunId: typeof p.nextRunId === "number" ? p.nextRunId : 1,
@@ -370,15 +400,369 @@ function computeLimits(window: number): AcpLimits {
 	};
 }
 
-function nudgeText(tokens: number, limits: AcpLimits): string {
+function nudgeText(tokens: number, limits: AcpLimits, hint = ""): string {
 	const need = Math.max(0, tokens - limits.target);
 	return (
 		`[acp] Context check-in: ${tokens.toLocaleString()} tokens (${((tokens / limits.window) * 100).toFixed(1)}% of ${limits.window.toLocaleString()}). ` +
 		`Usage is above the ~${limits.soft.toLocaleString()} working band. When current work reaches a stopping point, ` +
 		`use \`compress\` (mNNNNN refs from <acp-id> tags as startId/endId) to summarize completed ranges ` +
 		`and free ~${need.toLocaleString()} tokens, bringing usage toward ~${limits.target.toLocaleString()}. ` +
-		`If everything is genuinely still in active use, continue and compress later.`
+		`If everything is genuinely still in active use, continue and compress later.` +
+		hint
 	);
+}
+
+/** 蒸馏建议(仅附加在已超软限的 nudge 里):活跃 tier-1 块堆积时可折成 tier-2,tier-2 → tier-3 同理 */
+function tierHintText(state: SessionState): string {
+	const activeOfTier = (t: 1 | 2 | 3) =>
+		state.prune.activeBlockIds
+			.map((id) => state.prune.blocksById[id])
+			.filter((b): b is CompressionBlock => !!b && b.tier === t)
+			.map((b) => b.blockId);
+	const t2 = activeOfTier(2);
+	if (t2.length >= TIER3_HINT_MIN) {
+		const [lo, hi] = [Math.min(...t2), Math.max(...t2)];
+		return ` Alternatively, condense the ${t2.length} tier-2 blocks (b${lo}${hi > lo ? `–b${hi}` : ""}) into one tier-3 block via compress with block refs.`;
+	}
+	const t1 = activeOfTier(1);
+	if (t1.length >= TIER2_HINT_MIN) {
+		const [lo, hi] = [Math.min(...t1), Math.max(...t1)];
+		return ` Alternatively, distill the ${t1.length} tier-1 blocks (b${lo}${hi > lo ? `–b${hi}` : ""}) into one tier-2 block: compress({content:[{startId:"b${lo}",endId:"b${hi}",summary:"…"}]}).`;
+	}
+	return "";
+}
+
+// ============ 二期:块蒸馏 / 锚点隐藏 / 统计 ============
+
+/** 块范围蒸馏:把 [firstBid..lastBid] 内全部活跃同层块折成一个高层块。
+ *  语义对齐 acp-kernel applyCompression:block 边界 → outputTier = min(3, targetTier+1);
+ *  children 置 inactive-consumed 但不清 byMessageId(原文仍隐藏,由新块覆盖);
+ *  effectiveMessageIds 取 children 的传递闭包(谱系在再压缩后仍存活)。
+ *  返回 ✓ 结果行或 ✗ 原因(不抛错,与消息分支的 per-item 报告风格一致)。 */
+function distillBlocks(
+	state: PruneMessagesState,
+	firstBid: number,
+	lastBid: number,
+	item: { topic?: string; startId: string; endId: string; summary: string },
+	runId: number,
+	toolCallId: string,
+): string {
+	const lo = Math.min(firstBid, lastBid);
+	const hi = Math.max(firstBid, lastBid);
+	if (hi - lo > 500) return `✗ range too large (b${lo}–b${hi}); distill in smaller batches`;
+	// 端点必须存在且活跃(捕获常见 stale-ref 错误);区间中段对 inactive/不存在的 id 透明
+	// ——被消费/已解压的块不占可见空间,数字区间按创建序穿透它们(对齐 BC "只有活跃块占位"语义)
+	const bLo = state.blocksById[lo];
+	if (!bLo || !bLo.active) {
+		return `✗ block b${lo} ${bLo ? "is not active (folded into a higher-tier block or already decompressed)" : "does not exist"} — use active block ids from compress tool results`;
+	}
+	const bHi = state.blocksById[hi];
+	if (!bHi || !bHi.active) {
+		return `✗ block b${hi} ${bHi ? "is not active (folded into a higher-tier block or already decompressed)" : "does not exist"} — use active block ids from compress tool results`;
+	}
+	const ids: number[] = [];
+	const blocks: CompressionBlock[] = [];
+	for (let bid = lo; bid <= hi; bid++) {
+		const b = state.blocksById[bid];
+		if (b && b.active) {
+			ids.push(bid);
+			blocks.push(b);
+		}
+	}
+	const targetTier = Math.min(...blocks.map((b) => b.tier));
+	if (blocks.some((b) => b.tier !== targetTier)) {
+		return `✗ range mixes tiers (${blocks.map((b) => `b${b.blockId}:T${b.tier}`).join(", ")}) — distill same-tier blocks only`;
+	}
+	// T3 是终态:重凝结 T3 零收益且可无限循环(参考 dog/billion-context-pi#3 防环护栏)
+	if (targetTier >= 3) {
+		return `✗ tier-3 is the highest tier — re-condensing tier-3 blocks reclaims nothing; compress new messages into fresh tier-1 blocks instead`;
+	}
+	const outputTier = (targetTier + 1) as 2 | 3;
+	const summaryTokens = Math.ceil(item.summary.length / 4);
+	// effectiveMessageIds = children 传递闭包(块蒸馏不直接覆盖消息)
+	const eff = new Set<string>();
+	let coveredTokens = 0;
+	let foldedSummaryTokens = 0;
+	for (const b of blocks) {
+		for (const id of b.effectiveMessageIds) eff.add(id);
+		coveredTokens += b.coveredTokens ?? 0;
+		foldedSummaryTokens += b.summaryTokens;
+	}
+	const blockId = state.nextBlockId++;
+	state.blocksById[blockId] = {
+		blockId,
+		runId,
+		active: true,
+		tier: outputTier,
+		directMessageIds: [],
+		effectiveMessageIds: [...eff],
+		consumedBlockIds: ids,
+		anchorToolCallId: toolCallId,
+		summary: item.summary,
+		summaryTokens,
+		topic: item.topic,
+		startRef: item.startId,
+		endRef: item.endId,
+		createdAt: Date.now(),
+		coveredTokens,
+	};
+	state.activeBlockIds.push(blockId);
+	for (const b of blocks) {
+		b.active = false;
+		b.deactivatedBy = "consumed";
+	}
+	state.activeBlockIds = state.activeBlockIds.filter((x) => !ids.includes(x));
+	return (
+		`✓ block b${blockId} (tier ${outputTier}): distilled ${ids.length} tier-${targetTier} block(s) ` +
+		`(b${lo}${hi > lo ? `–b${hi}` : ""}, ~${Math.round(coveredTokens)} tok originals + ${foldedSummaryTokens} tok of summaries) ` +
+		`→ ${summaryTokens} tok summary${item.topic ? ` [${item.topic}]` : ""}`
+	);
+}
+
+/** 计算应隐藏的锚点 entry 集合:被完全消费的 compress 调用所承载的
+ *  assistant 消息 + 其 toolResult。摘要 in-band 承载于 compress 调用消息,消费后
+ *  旧摘要被高层摘要取代 → 锚点一起隐藏(decompress 复活子块时自动恢复,派生规则不落盘)。
+ *  - assistant 行仅在全部 toolCall 均为已隐藏 compress 调用时才隐藏(兄弟调用保护);
+ *  - toolResult 仅在其调用方 assistant 行被隐藏时才隐藏(不拆 toolCall/toolResult 对);
+ *  - 同一调用批量建的块只要还有任一块可见(含 decompress 停用),锚点保留。 */
+function computeHiddenAnchorEntries(state: SessionState, rows: AlignmentRow[]): Set<string> {
+	const empty = new Set<string>();
+	const allBlocks = Object.values(state.prune.blocksById);
+	if (allBlocks.length === 0) return empty;
+	const hiddenCallIds = new Set<string>();
+	const groups = new Map<string, CompressionBlock[]>();
+	for (const b of allBlocks) {
+		if (!b?.anchorToolCallId) continue;
+		const list = groups.get(b.anchorToolCallId) ?? [];
+		list.push(b);
+		groups.set(b.anchorToolCallId, list);
+	}
+	for (const [tcid, bs] of groups) {
+		if (!bs.some((b) => b.active || b.deactivatedBy !== "consumed")) hiddenCallIds.add(tcid);
+	}
+	if (hiddenCallIds.size === 0) return empty;
+	const hidden = new Set<string>();
+	const carrierEntryByCallId = new Map<string, string>();
+	for (const row of rows) {
+		if (!row.entryId || !row.msg) continue;
+		if (row.msg.role === "assistant") {
+			const calls = toolCallIdsOf(row.msg);
+			if (calls.length > 0 && calls.every((id) => hiddenCallIds.has(id))) hidden.add(row.entryId);
+			for (const id of calls) carrierEntryByCallId.set(id, row.entryId);
+		}
+	}
+	for (const row of rows) {
+		if (!row.entryId || !row.msg) continue;
+		if (
+			row.msg.role === "toolResult" &&
+			typeof row.msg.toolCallId === "string" &&
+			hiddenCallIds.has(row.msg.toolCallId)
+		) {
+			const carrier = carrierEntryByCallId.get(row.msg.toolCallId);
+			if (carrier && hidden.has(carrier)) hidden.add(row.entryId);
+		}
+	}
+	return hidden;
+}
+
+/** 压缩统计(按块口径,避免 byMessageId 在蒸馏后双计):
+ *  活跃块覆盖的原文 token + 已消费块被取代的摘要锚点 token */
+function compressionStats(state: SessionState): { totalTokens: number; activeByTier: [number, number, number] } {
+	const activeSet = new Set(state.prune.activeBlockIds);
+	let covered = 0;
+	let anchorFreed = 0;
+	const activeByTier: [number, number, number] = [0, 0, 0];
+	for (const b of Object.values(state.prune.blocksById)) {
+		if (!b) continue;
+		if (activeSet.has(b.blockId)) {
+			covered += b.coveredTokens ?? 0;
+			if (b.tier >= 1 && b.tier <= 3) activeByTier[b.tier - 1]++;
+		} else if (b.deactivatedBy === "consumed") {
+			// 其摘要锚点(compress 调用消息)已被高层摘要取代 → 实际释放
+			anchorFreed += b.summaryTokens;
+		}
+	}
+	return { totalTokens: Math.round(covered + anchorFreed), activeByTier };
+}
+
+// ============ search_context:被折叠内容的零成本关键词召回 ============
+// 设计对齐 acp-kernel hybrid 检索:0.7×BM25(stem + CJK 分词) + 0.3×char-bigram,
+// 角色权重 user 1.5 / assistant 1 / tool 0.6 / block 1。文档集 =
+// 全部块摘要(含 inactive,谱系可搜) + 被任一块覆盖的原始消息(session 里仍存全文);
+// 未被压缩的消息不进索引(模型本来就看得见)。检索零状态改动,不污染上下文。
+
+interface SearchDoc {
+	kind: "block" | "message";
+	ref: string;
+	text: string;
+	title: string;
+	role?: "user" | "assistant" | "tool";
+	tier?: number;
+	tokens?: number;
+	blockId?: number;
+	active?: boolean; // block 文档用:inactive 块谱系可搜但不可直接 decompress
+}
+
+const LATIN_TOKEN_RE = /[a-z0-9][a-z0-9_+-]*/g;
+const CJK_RUN_RE = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]+/g;
+const CJK_CHAR_RE = /[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/;
+let cjkSegmenter: Intl.Segmenter | null | undefined; // undefined=未初始化
+function getSegmenter(): Intl.Segmenter | null {
+	if (cjkSegmenter !== undefined) return cjkSegmenter;
+	try {
+		cjkSegmenter = new Intl.Segmenter("zh", { granularity: "word" });
+	} catch {
+		cjkSegmenter = null;
+	}
+	return cjkSegmenter;
+}
+
+/** 极简英文词形归一(只处理规则复数,与 acp-kernel stem 的轻量定位一致) */
+function stemLatin(w: string): string {
+	if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) return w.slice(0, -1);
+	return w;
+}
+
+/** CJK 分词:Intl.Segmenter 词典分词;退化到 字符 bigram + 单字 */
+function cjkRunTokens(run: string): string[] {
+	const seg = getSegmenter();
+	if (seg) {
+		const words: string[] = [];
+		for (const s of seg.segment(run)) {
+			if (s.segment.length >= 2 && CJK_CHAR_RE.test(s.segment)) words.push(s.segment);
+		}
+		if (words.length > 0) return words;
+	}
+	const out: string[] = [];
+	for (let i = 0; i < run.length - 1; i++) out.push(run.slice(i, i + 2));
+	for (const ch of run) out.push(ch);
+	return out;
+}
+
+function tokenize(text: string): string[] {
+	const lower = text.toLowerCase();
+	const out: string[] = [];
+	for (const w of lower.match(LATIN_TOKEN_RE) ?? []) if (w.length >= 2) out.push(stemLatin(w));
+	for (const run of lower.match(CJK_RUN_RE) ?? []) out.push(...cjkRunTokens(run));
+	return out;
+}
+
+function charBigramsOf(text: string): string[] {
+	const lower = text.toLowerCase();
+	const out: string[] = [];
+	for (const run of lower.match(CJK_RUN_RE) ?? []) {
+		for (let i = 0; i < run.length - 1; i++) out.push(run.slice(i, i + 2));
+	}
+	for (const w of lower.match(LATIN_TOKEN_RE) ?? []) {
+		if (w.length >= 2) for (let i = 0; i < w.length - 1; i++) out.push(w.slice(i, i + 2));
+	}
+	return out;
+}
+
+function bm25Scores(docs: SearchDoc[], qTerms: string[]): Map<string, number> {
+	const out = new Map<string, number>();
+	if (docs.length === 0 || qTerms.length === 0) return out;
+	const k1 = 1.2;
+	const b = 0.75;
+	const parsed = docs.map((d) => {
+		const tf = new Map<string, number>();
+		let len = 0;
+		for (const t of tokenize(d.text)) {
+			tf.set(t, (tf.get(t) ?? 0) + 1);
+			len++;
+		}
+		return { ref: d.ref, tf, len };
+	});
+	const avgdl = parsed.reduce((s, d) => s + d.len, 0) / docs.length;
+	if (avgdl <= 0) return out;
+	const idf = new Map<string, number>();
+	for (const t of new Set(qTerms)) {
+		let df = 0;
+		for (const d of parsed) if (d.tf.has(t)) df++;
+		idf.set(t, Math.log(1 + (docs.length - df + 0.5) / (df + 0.5)));
+	}
+	for (const d of parsed) {
+		let s = 0;
+		for (const t of qTerms) {
+			const f = d.tf.get(t) ?? 0;
+			if (f === 0) continue;
+			s += ((idf.get(t) ?? 0) * (f * (k1 + 1))) / (f + k1 * (1 - b + (b * d.len) / avgdl));
+		}
+		out.set(d.ref, s);
+	}
+	return out;
+}
+
+function fuzzyScores(docs: SearchDoc[], qGrams: Set<string>): Map<string, number> {
+	const out = new Map<string, number>();
+	if (qGrams.size === 0) return out;
+	for (const d of docs) {
+		const dg = new Set(charBigramsOf(d.text));
+		let hits = 0;
+		for (const g of qGrams) if (dg.has(g)) hits++;
+		out.set(d.ref, hits / qGrams.size);
+	}
+	return out;
+}
+
+function searchDocs(docs: SearchDoc[], query: string, limit: number): { doc: SearchDoc; score: number }[] {
+	const bm = bm25Scores(docs, tokenize(query));
+	const fz = fuzzyScores(docs, new Set(charBigramsOf(query)));
+	let maxBm = 1e-9;
+	let maxFz = 1e-9;
+	for (const v of bm.values()) maxBm = Math.max(maxBm, v);
+	for (const v of fz.values()) maxFz = Math.max(maxFz, v);
+	const ROLE_W = { user: 1.5, assistant: 1, tool: 0.6, block: 1 };
+	return docs
+		.map((d) => {
+			const bmS = (bm.get(d.ref) ?? 0) / maxBm;
+			const fzS = (fz.get(d.ref) ?? 0) / maxFz;
+			// 噪声门:fuzzy bigram 对长 token 会随机命中常见双字(at/no/ma…),
+			// 要求词级 BM25 命中、或 bigram 覆盖率足够高(≥1/3)才算真实命中
+			const ok = (bm.get(d.ref) ?? 0) > 0 || (fz.get(d.ref) ?? 0) >= 0.34;
+			const w = d.kind === "block" ? ROLE_W.block : (d.role && ROLE_W[d.role]) ?? 1;
+			return { doc: d, score: ok ? (0.7 * bmS + 0.3 * fzS) * w : 0 };
+		})
+		.filter((x) => x.score > 0.01)
+		.sort((a, b) => b.score - a.score)
+		.slice(0, limit);
+}
+
+/** 提取消息可搜索文本(text block + toolCall 参数;跳过图片等二进制块) */
+function messageText(msg: any): string {
+	const c = msg?.content;
+	if (typeof c === "string") return c;
+	if (!Array.isArray(c)) return "";
+	let out = "";
+	for (const b of c) {
+		if (b?.type === "text" && typeof b.text === "string") out += b.text + "\n";
+		else if (b?.type === "toolCall") out += JSON.stringify(b.arguments ?? {}) + "\n";
+		else if (b && typeof b === "object") out += JSON.stringify(b).slice(0, 2000) + "\n";
+	}
+	return out;
+}
+
+function makePreview(text: string, query: string, len = 200): string {
+	const lower = text.toLowerCase();
+	const terms = query.toLowerCase().trim().split(/\s+/).filter((t) => t.length > 0);
+	let hit = -1;
+	for (const t of terms) {
+		const i = lower.indexOf(t);
+		if (i >= 0) {
+			hit = i;
+			break;
+		}
+	}
+	if (hit < 0) return text.length > len ? text.slice(0, len - 1) + "…" : text;
+	const half = Math.max(0, Math.floor(len / 2) - 10);
+	const start = Math.max(0, hit - half);
+	const end = Math.min(text.length, start + len);
+	return (start > 0 ? "…" : "") + text.slice(start, end).trim() + (end < text.length ? "…" : "");
+}
+
+function formatTok(n?: number): string {
+	if (!n || n <= 0) return "";
+	return n < 1000 ? `${Math.round(n)}tok` : `${(n / 1000).toFixed(1)}Ktok`;
 }
 
 // ============ 扩展主体 ============
@@ -479,15 +863,20 @@ export default function acpExtension(pi: ExtensionAPI): void {
 		// prune + 注入 acp-id 标签(单循环完成:先决定保留,保留则就地注入标签)
 		const refByEntryId = buildRefMap(rows);
 		const hasCompressed = Object.keys(state.prune.byMessageId).length > 0;
+		// 锚点隐藏:被完全消费的 compress 调用(摘要已被高层块取代)整体移出上下文
+		const hiddenEntryIds = computeHiddenAnchorEntries(state, rows);
 		const firstUserMsgIdx = msgs.findIndex((m) => m?.role === "user");
 		const retained: any[] = [];
 		for (let i = 0; i < msgs.length; i++) {
 			const msg = msgs[i];
 			const entryId = aligned ? rows[i]?.entryId ?? undefined : undefined;
 			let keep = true;
-			if (aligned && hasCompressed && entryId) {
-				const pe = state.prune.byMessageId[entryId];
-				keep = !pe || !pe.activeBlockIds || pe.activeBlockIds.length === 0;
+			if (aligned && entryId) {
+				if (hasCompressed) {
+					const pe = state.prune.byMessageId[entryId];
+					if (pe && pe.activeBlockIds && pe.activeBlockIds.length > 0) keep = false;
+				}
+				if (keep && hiddenEntryIds.has(entryId)) keep = false;
 			}
 			if (i === firstUserMsgIdx) keep = true; // 强制保留第一条 user(provider API 要求至少一条 user)
 			if (!keep) continue;
@@ -508,7 +897,7 @@ export default function acpExtension(pi: ExtensionAPI): void {
 			if (limits && tokens >= limits.soft && state.nudge.markedAtUsage > 0) {
 				retained.push({
 					role: "user",
-					content: [{ type: "text", text: nudgeText(tokens, limits) }],
+					content: [{ type: "text", text: nudgeText(tokens, limits, tierHintText(state)) }],
 				} as any);
 				state.nudge.lastNudgeUsage = tokens;
 				state.nudge.lastNudgeTurn = state.nudge.turnCounter;
@@ -530,24 +919,33 @@ export default function acpExtension(pi: ExtensionAPI): void {
 			"(the mNNNNN refs shown in <acp-id> tags) and a `summary` you write that replaces all content in the range. " +
 			"Keep only essential details: conclusions, file paths, decisions, exact values. The summary replaces the " +
 			"original messages in future context — write it as if the team needs to continue from it. Batch multiple " +
-			"non-overlapping ranges in one call. Never compress the last few messages (still in active use).",
+			"non-overlapping ranges in one call. Never compress the last few messages (still in active use). " +
+			"Distillation: startId/endId may also be block refs (bN, both ends) — folds ALL blocks in the id range " +
+			"(same tier, active) into ONE higher-tier block (tier-1→tier-2→tier-3; tier-3 is terminal). " +
+			"Use it when old summaries pile up: progressively relax fidelity — priority goals > decisions+reasons > artifacts > conclusions > lessons.",
 		promptGuidelines: [
 			"Use compress to summarize COMPLETED conversation ranges (concluded topics, verbose exploration, " +
 				"repetitive tool output) into concise summaries, freeing context. Specify boundaries with the mNNNNN " +
 				"refs from <acp-id> tags and write a complete technical summary.",
+			"When old compress blocks accumulate, distill them: compress with startId/endId as block refs (bN..bM) " +
+				"replaces several old summaries with one higher-tier summary.",
 		],
 		parameters: Type.Object({
 			content: Type.Array(
 				Type.Object({
 					topic: Type.Optional(Type.String({ description: "Short label (3-5 words) for this range" })),
-					startId: Type.String({ description: "Start message ref, e.g. m00003 (from <acp-id> tag)" }),
-					endId: Type.String({ description: "End message ref, e.g. m00010 (from <acp-id> tag)" }),
+					startId: Type.String({
+						description: "Start ref: mNNNNN (message, from <acp-id> tag) or bN (block id, for tier distillation)",
+					}),
+					endId: Type.String({
+						description: "End ref (inclusive): mNNNNN or bN. Must match startId's kind.",
+					}),
 					summary: Type.String({
 						description:
 							"Complete technical summary replacing all content in range. Keep conclusions, file paths, decisions, exact values.",
 					}),
 				}),
-				{ description: "One or more non-overlapping ranges to compress" },
+				{ description: "One or more non-overlapping ranges (message refs or block refs) to compress" },
 			),
 		}),
 		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
@@ -560,6 +958,21 @@ export default function acpExtension(pi: ExtensionAPI): void {
 			const coveredEntryIds = new Set<string>();
 
 			for (const item of params.content) {
+				// 块范围蒸馏:startId/endId 均为 bN → 旧块折成更高层摘要(tier-1→2→3)
+				const bsRef = BLOCK_REF_RE.exec(item.startId);
+				const beRef = BLOCK_REF_RE.exec(item.endId);
+				if (bsRef || beRef) {
+					if (!bsRef || !beRef) {
+						results.push(
+							`✗ ${item.startId}–${item.endId}: mixed ref kinds — use both bN (block distillation) or both mNNNNN (message range)`,
+						);
+						continue;
+					}
+					results.push(
+						distillBlocks(state.prune, parseInt(bsRef[1], 10), parseInt(beRef[1], 10), item, runId, toolCallId),
+					);
+					continue;
+				}
 				const startIdx = refToIndex(item.startId);
 				const endIdx = refToIndex(item.endId);
 				if (startIdx === null || endIdx === null) {
@@ -629,6 +1042,7 @@ export default function acpExtension(pi: ExtensionAPI): void {
 					startRef: item.startId,
 					endRef: item.endId,
 					createdAt: Date.now(),
+					coveredTokens: Math.round(rangeTokens),
 				};
 				state.prune.blocksById[blockId] = block;
 				state.prune.activeBlockIds.push(blockId);
@@ -659,18 +1073,17 @@ export default function acpExtension(pi: ExtensionAPI): void {
 
 			saveState(state, pi);
 
-			const totalSaved = Object.values(state.prune.byMessageId).reduce(
-				(sum, pe) => sum + (pe.activeBlockIds.length > 0 ? pe.tokenCount : 0),
-				0,
-			);
+			// 统计改为按块口径:活跃块覆盖原文 + 已消费块被取代的摘要锚点(避免 byMessageId 蒸馏后双计)
+			const stats = compressionStats(state);
 			return {
 				content: [
 					{
 						type: "text",
 						text:
 							results.join("\n") +
-							`\n\nTotal compressed so far: ~${Math.round(totalSaved)} tokens across ` +
-							`${state.prune.activeBlockIds.length} active block(s).`,
+							`\n\nTotal folded: ~${stats.totalTokens.toLocaleString()} tokens (active blocks: ` +
+							(stats.activeByTier.map((n, i) => (n > 0 ? `${n}×T${i + 1}` : "")).filter(Boolean).join(", ") || "none") +
+							`).`,
 					},
 				],
 				details: { runId, blocks: state.prune.activeBlockIds.length },
@@ -678,13 +1091,15 @@ export default function acpExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	// ---- decompress 工具:停用块,消息重现 ----
+	// ---- decompress 工具:停用块;tier≥2 上翻一代(复活直接子块) ----
 	pi.registerTool({
 		name: "decompress",
 		label: "Decompress Context",
 		description:
 			"Restore previously compressed conversation content by deactivating a compression block. " +
-			"Pass a blockId (bN) to restore that range's original messages into context.",
+			"Tier-1 block (bN): its original messages return to context. Tier-2/3 block: its direct child blocks " +
+			"are re-activated — their summaries become visible again, original messages stay folded (decompress a " +
+			"child to go one generation further).",
 		parameters: Type.Object({
 			blockId: Type.String({ description: "Block id to deactivate, e.g. b1" }),
 		}),
@@ -700,26 +1115,153 @@ export default function acpExtension(pi: ExtensionAPI): void {
 				return { content: [{ type: "text", text: `Block b${bid} not found` }], details: {} };
 			}
 			if (!block.active) {
+				if (block.deactivatedBy === "consumed") {
+					const consumer = Object.values(state.prune.blocksById).find(
+						(b) => b.active && b.consumedBlockIds.includes(bid),
+					);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Block b${bid} is folded into ${consumer ? `active block b${consumer.blockId}` : "a higher-tier block"} — decompress that block instead.`,
+							},
+						],
+						details: {},
+					};
+				}
 				return { content: [{ type: "text", text: `Block b${bid} already inactive` }], details: {} };
 			}
-			// 停用块:从 activeBlockIds 移除,从其消息的 activeBlockIds 移除
+			// tier≥2:上翻一代 —— 复活直接子块(其摘要锚点重现),孙代原文仍折叠。
+			// 不清子块的 byMessageId(子块 active 即覆盖其原文),谱系每层可再上翻。
+			let restoredChildren = 0;
+			for (const cid of block.consumedBlockIds) {
+				const child = state.prune.blocksById[cid];
+				if (child && !child.active) {
+					child.active = true;
+					child.deactivatedBy = undefined;
+					state.prune.activeBlockIds.push(cid);
+					restoredChildren++;
+				}
+			}
+			// 停用本块:从 activeBlockIds 移除;tier-1 另需从其消息的 activeBlockIds 移除
 			block.active = false;
+			block.deactivatedBy = "decompress";
 			state.prune.activeBlockIds = state.prune.activeBlockIds.filter((x) => x !== bid);
 			for (const id of block.directMessageIds) {
 				const pe = state.prune.byMessageId[id];
 				if (pe) pe.activeBlockIds = pe.activeBlockIds.filter((x) => x !== bid);
 			}
 			saveState(state, pi);
+			const text =
+				block.consumedBlockIds.length > 0
+					? `Decompressed b${bid} (tier ${block.tier}): ${restoredChildren} tier-${block.tier - 1} block(s) re-activated — their summaries are visible again; original messages stay folded. Decompress a child block to restore its original messages. `
+					: `Decompressed b${bid}: ${block.directMessageIds.length} messages restored to context. `;
 			return {
-				content: [
-					{
-						type: "text",
-						text: `Decompressed b${bid}: ${block.directMessageIds.length} messages restored to context. ` +
-							`Active blocks remaining: ${state.prune.activeBlockIds.length}.`,
-					},
-				],
+				content: [{ type: "text", text: text + `Active blocks remaining: ${state.prune.activeBlockIds.length}.` }],
 				details: { deactivated: bid },
 			};
+		},
+	});
+
+	// ---- search_context 工具:零成本检索被折叠内容(不解压、不改状态) ----
+	pi.registerTool({
+		name: "search_context",
+		label: "Search Context",
+		description:
+			"Search compressed block summaries AND original messages folded into blocks by keyword — without decompressing. " +
+			"Use to cheaply locate detail before deciding to decompress. Returns ranked hits with ref, size, preview, " +
+			"and the exact decompress command for full content. CJK-aware.",
+		promptGuidelines: [
+			"Search locates detail folded into summaries or past messages — cheaper than decompressing blind.",
+			"Each hit shows a block/message ref, size, and the decompress command for full content; " +
+				"message hits link to the owning block.",
+		],
+		parameters: Type.Object({
+			query: Type.String({ description: "Keywords to locate (space-separated terms; CJK supported)" }),
+			limit: Type.Optional(Type.Number({ description: "Max results (default 10, max 50)" })),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const state = loadState(ctx);
+			const blocks = Object.values(state.prune.blocksById).filter(Boolean) as CompressionBlock[];
+			const rows = getAlignmentRows(ctx);
+			const refByEntryId = buildRefMap(rows);
+			// 消息归属:优先 active 块(其摘要是当前代表),否则最早的块覆盖
+			const ownerByMsg = new Map<string, number>();
+			for (const b of blocks) {
+				if (!b.active) continue;
+				for (const id of b.effectiveMessageIds) ownerByMsg.set(id, b.blockId);
+			}
+			for (const b of blocks) {
+				if (b.active) continue;
+				for (const id of b.effectiveMessageIds) if (!ownerByMsg.has(id)) ownerByMsg.set(id, b.blockId);
+			}
+			const docs: SearchDoc[] = blocks.map((b) => ({
+				kind: "block",
+				ref: `b${b.blockId}`,
+				text: `${b.topic ?? ""}\n${b.summary}`,
+				title: b.topic ?? `b${b.blockId}`,
+				tier: b.tier,
+				tokens: b.coveredTokens ?? 0,
+				blockId: b.blockId,
+				active: b.active,
+			}));
+			let msgCount = 0;
+			for (const row of rows) {
+				const id = row.entryId;
+				if (!id || !ownerByMsg.has(id)) continue;
+				const text = messageText(row.msg);
+				if (!text || text.trim().length < 2) continue;
+				const owner = ownerByMsg.get(id)!;
+				const role: "user" | "assistant" | "tool" =
+					row.msg?.role === "toolResult" ? "tool" : row.msg?.role === "user" ? "user" : "assistant";
+				docs.push({
+					kind: "message",
+					ref: refByEntryId.get(id) ?? id,
+					text,
+					title: `${role}: ${text.trim().slice(0, 60)}`,
+					role,
+					tier: state.prune.blocksById[owner]?.tier,
+					tokens: estimateMessageTokens(row.msg),
+					blockId: owner,
+				});
+				msgCount++;
+			}
+			const limit =
+				typeof params.limit === "number" && params.limit > 0 ? Math.min(Math.round(params.limit), 50) : 10;
+			const hits = searchDocs(docs, params.query, limit);
+			if (hits.length === 0) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `No matches for "${params.query}" across ${blocks.length} block(s) and ${msgCount} folded message(s).`,
+						},
+					],
+					details: {},
+				};
+			}
+			const lines = [
+				`Found ${hits.length} match(es) for "${params.query}" (searched ${blocks.length} blocks + ${msgCount} folded messages):`,
+			];
+			for (const h of hits) {
+				const d = h.doc;
+				const meta = [
+					d.kind === "block" ? `block ${d.ref}${d.active === false ? " [inactive]" : ""}` : `message ${d.ref}`,
+					d.role ? `(${d.role})` : "",
+					d.tier ? `T${d.tier}` : "",
+					`score:${h.score.toFixed(2)}`,
+					formatTok(d.tokens),
+				]
+					.filter(Boolean)
+					.join(" ");
+				lines.push("", `${meta}  "${d.title.slice(0, 50)}"`, `  ${makePreview(d.text, params.query)}`);
+				lines.push(
+					d.kind === "block"
+						? `  → decompress({blockId:"${d.ref}"}) to restore this range`
+						: `  → decompress({blockId:"b${d.blockId}"}) to restore the block containing ${d.ref}`,
+				);
+			}
+			return { content: [{ type: "text", text: lines.join("\n") }], details: { hits: hits.length } };
 		},
 	});
 }
