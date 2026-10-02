@@ -38,6 +38,18 @@
 
 ✅ compress / decompress 工具 · ✅ prune · ✅ mNNNNN 标签 · ✅ 配对保护 · ✅ 持久化与恢复 · ✅ 自然边界用量提示
 
+## pi ≥0.99 兼容性修复(2026-09-30)
+
+pi 0.99 起把 system prompt 也存为 `type=message, role=system` 的 session entry,且
+compaction/branch_summary entry 会展开出 compactionSummary/branchSummary 消息;
+context 事件的 `event.messages` 过滤了 system 消息。旧的“entry 列表与 messages 1:1”
+假设失效,aligned 守卫恒为 false,`<acp-id>` 标签整体不注入(模型看不到消息 id)。
+修复:`getAlignmentRows()` 复刻 pi 投影规则做对齐(message 非 system 占行、
+custom_message 占行、compaction/branchSummary 的 summary 占行但 entryId=null 不可压,
+system 跳过),context 注入与 compress 解析共用同一对齐序列。已验证:普通会话、
+多轮+toolCall/toolResult、compress 全链路(引用解析/保护/prune/摘要保留)、
+含 compaction entry 的会话四种场景。
+
 ## 二期遗留(非核心闭环,按需补)
 
 - **GC old-gen 合并**:长会话旧块过多时自动合并截断(当前:块永远 young)

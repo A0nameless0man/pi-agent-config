@@ -17,6 +17,12 @@
  *   ✅ decompress 工具(停用块→消息重现)
  *   ⏳ 二期:GC old-gen 合并、质量门控、KEEP/REF 标记、tier 2/3 蒸馏
  *
+ * pi ≥0.99 兼容(2026-09-30 修复):session 现在把 system prompt 也存为 message entry
+ * (role=system),且 compaction/branch_summary entry 会展开出 compactionSummary /
+ * branchSummary 消息;context 事件的 event.messages 过滤了 system 消息。旧的
+ * "entry 列表与 messages 1:1"假设因此失效,导致 aligned 恒为 false、标签整体不注入
+ * (模型看不到任何 <acp-id>)。现在用 getAlignmentRows 复刻 pi 的投影规则做对齐。
+ *
  * 设计文档:C:\Users\hugua\project-codes\experiment\opencode-acp\PORT_TO_PI_DESIGN.md
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -188,21 +194,53 @@ function invalidateState(ctx: ExtensionContext): void {
 }
 
 // ============ 消息 ↔ entry 关联 + mNNNNN 分配 ============
-/**
- * 返回参与 LLM 上下文的 entry 列表(type=message | custom_message),
- * 与 context 事件的 event.messages 按位置 1:1 对应(已验证)。
- * entry.id 是稳定标识,entry.message 是消息体。
- */
-function getMessageEntries(ctx: ExtensionContext): any[] {
-	const all = ctx.sessionManager.buildContextEntries();
-	return all.filter((e: any) => e && (e.type === "message" || e.type === "custom_message"));
+/** 对齐行:与 context 事件 event.messages 的一行对应。entryId 为 null 表示该行
+ *  消息没有可压缩的 session entry(compactionSummary / branchSummary),
+ *  不注入标签、不可压缩、永不被 prune。 */
+interface AlignmentRow {
+	entryId: string | null;
+	msg: any;
 }
 
-/** 确定性分配 mNNNNN:按 entry 顺序,index+1 零填充。被压缩的消息仍占号(稳定 ref)。 */
-function buildRefMap(entries: any[]): Map<string, string> {
+/**
+ * 复刻 pi 的 entry→messages 投影,返回与 context 事件 event.messages 位置 1:1
+ * 对应的对齐行序列。
+ *
+ * pi ≥0.99 投影规则(dist/core/session-manager.js sessionEntryToContextMessages):
+ *   - message:        → [message],但 role=system 被 context 事件过滤(不占行)
+ *   - custom_message: → 1 条 role=custom 消息
+ *   - branch_summary: → summary 存在时 1 条 role=branchSummary 消息
+ *   - compaction:     → systemMessage(role=system,被过滤)+ summary(role=compactionSummary)
+ *   - 其他(custom 等): → 0 条
+ * 一旦 pi 投影规则再变,aligned 守卫仍会兜底(放弃注入而不是错位注入)。
+ */
+function getAlignmentRows(ctx: ExtensionContext): AlignmentRow[] {
+	const all = ctx.sessionManager.buildContextEntries() as any[];
+	const rows: AlignmentRow[] = [];
+	for (const e of all) {
+		if (!e) continue;
+		const id = typeof e.id === "string" ? e.id : null;
+		if (e.type === "message") {
+			const m = e.message;
+			if (!m || m.role === "system") continue; // context 事件不含 system 消息
+			rows.push({ entryId: id, msg: m });
+		} else if (e.type === "custom_message") {
+			rows.push({ entryId: id, msg: entryMessage(e) });
+		} else if (e.type === "branch_summary") {
+			if (e.summary) rows.push({ entryId: null, msg: e });
+		} else if (e.type === "compaction") {
+			// systemMessage 被 context 事件过滤;仅 summary 占一行(entryId=null,不可压缩)
+			if (e.summary) rows.push({ entryId: null, msg: e });
+		}
+	}
+	return rows;
+}
+
+/** 确定性分配 mNNNNN:按对齐行顺序,index+1 零填充。被压缩的消息仍占号(稳定 ref)。 */
+function buildRefMap(rows: AlignmentRow[]): Map<string, string> {
 	const refByEntryId = new Map<string, string>();
-	for (let i = 0; i < entries.length; i++) {
-		const id = entries[i]?.id;
+	for (let i = 0; i < rows.length; i++) {
+		const id = rows[i]?.entryId;
 		if (typeof id === "string") {
 			refByEntryId.set(id, REF_PREFIX + String(i + 1).padStart(REF_WIDTH, "0"));
 		}
@@ -273,8 +311,7 @@ function toolCallIdsOf(msg: any): string[] {
  * - 若范围内 assistant 有 toolCall,其 toolResult 必须也在范围内(否则 endIdx 后扩)
  * - 若范围边界落在 toolResult 上,其 toolCall 必须也在范围内(否则 startIdx 前扩)
  */
-function adjustForToolPairs(entries: any[], startIdx: number, endIdx: number): { start: number; end: number } {
-	const msgs = entries.map(entryMessage);
+function adjustForToolPairs(msgs: any[], startIdx: number, endIdx: number): { start: number; end: number } {
 	let start = startIdx;
 	let end = endIdx;
 	// 多轮收敛(toolResult 后扩可能引入新 assistant 的 toolCall)
@@ -434,19 +471,19 @@ export default function acpExtension(pi: ExtensionAPI): void {
 	pi.on("context", async (event, ctx) => {
 		const state = loadState(ctx);
 		const msgs = event.messages as any[];
-		const entries = getMessageEntries(ctx);
+		const rows = getAlignmentRows(ctx);
 
-		// 位置对应守卫:若不一致(异常情况),跳过 prune 保守处理,只尽量注入标签
-		const aligned = entries.length === msgs.length;
+		// 位置对应守卫:若不一致(pi 投影规则再变/异常情况),跳过 prune 保守处理,不注入标签
+		const aligned = rows.length === msgs.length;
 
 		// prune + 注入 acp-id 标签(单循环完成:先决定保留,保留则就地注入标签)
-		const refByEntryId = aligned ? buildRefMap(entries) : new Map<string, string>();
+		const refByEntryId = buildRefMap(rows);
 		const hasCompressed = Object.keys(state.prune.byMessageId).length > 0;
 		const firstUserMsgIdx = msgs.findIndex((m) => m?.role === "user");
 		const retained: any[] = [];
 		for (let i = 0; i < msgs.length; i++) {
 			const msg = msgs[i];
-			const entryId = aligned ? entries[i]?.id : undefined;
+			const entryId = aligned ? rows[i]?.entryId ?? undefined : undefined;
 			let keep = true;
 			if (aligned && hasCompressed && entryId) {
 				const pe = state.prune.byMessageId[entryId];
@@ -515,13 +552,8 @@ export default function acpExtension(pi: ExtensionAPI): void {
 		}),
 		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 			const state = loadState(ctx);
-			const entries = getMessageEntries(ctx);
-			const refByEntryId = buildRefMap(entries);
-			const entryByRef = new Map<string, any>();
-			for (const e of entries) {
-				const r = refByEntryId.get(e.id);
-				if (r) entryByRef.set(r, e);
-			}
+			const rows = getAlignmentRows(ctx);
+			const refByEntryId = buildRefMap(rows);
 
 			const runId = state.prune.nextRunId++;
 			const results: string[] = [];
@@ -534,15 +566,15 @@ export default function acpExtension(pi: ExtensionAPI): void {
 					results.push(`✗ ${item.startId}–${item.endId}: invalid ref (use mNNNNN from <acp-id> tags)`);
 					continue;
 				}
-				if (startIdx >= entries.length || endIdx >= entries.length) {
-					results.push(`✗ ${item.startId}–${item.endId}: ref out of range (max m${String(entries.length).padStart(REF_WIDTH, "0")})`);
+				if (startIdx >= rows.length || endIdx >= rows.length) {
+					results.push(`✗ ${item.startId}–${item.endId}: ref out of range (max m${String(rows.length).padStart(REF_WIDTH, "0")})`);
 					continue;
 				}
 				let s = Math.min(startIdx, endIdx);
 				let e = Math.max(startIdx, endIdx);
 
 				// 保护最近 N 条消息
-				const minCompressable = entries.length - PROTECT_RECENT_N;
+				const minCompressable = rows.length - PROTECT_RECENT_N;
 				if (s >= minCompressable) {
 					results.push(`✗ ${item.startId}–${item.endId}: includes recent messages (protected, still in use)`);
 					continue;
@@ -554,18 +586,18 @@ export default function acpExtension(pi: ExtensionAPI): void {
 				}
 
 				// 配对保护
-				const adj = adjustForToolPairs(entries, s, e);
+				const adj = adjustForToolPairs(rows.map((r) => r.msg), s, e);
 				s = adj.start;
 				e = adj.end;
 
-				// 收集范围内的 entry id(message 型;custom_message 也可压缩)
+				// 收集范围内的 entry id(有 entryId 的行才可压缩;compaction/branchSummary 行不可压)
 				const rangeIds: string[] = [];
 				let rangeTokens = 0;
 				for (let i = s; i <= e; i++) {
-					const id = entries[i]?.id;
+					const id = rows[i]?.entryId ?? undefined;
 					if (typeof id === "string") {
 						rangeIds.push(id);
-						rangeTokens += estimateMessageTokens(entryMessage(entries[i]));
+						rangeTokens += estimateMessageTokens(rows[i]?.msg);
 					}
 				}
 
