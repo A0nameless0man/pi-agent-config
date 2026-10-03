@@ -30,6 +30,13 @@
  * "entry 列表与 messages 1:1"假设因此失效,导致 aligned 恒为 false、标签整体不注入
  * (模型看不到任何 <acp-id>)。现在用 getAlignmentRows 复刻 pi 的投影规则做对齐。
  *
+ * pi ≥1.0 兼容(2026-10-03 修复):assistant 响应失败(连接错误等)时,pi 核心恢复逻辑
+ * (_omitRecoveryAttempt)会 appendContextEdit(targetId, null) 把失败消息从投影中删除。
+ * buildContextEntries() 不解析 context_edit(真正的投影是 buildSessionProjection),
+ * 旧版 getAlignmentRows 仍给被删消息计一行 → aligned 恒为 false → prune 静默失效。
+ * 实证:小书痴会话 2026-10-02T14-08-53,15:31:01 一条 context_edit 之后所有 compress
+ * 都不再减少实际出站 token(compress 工具仍报成功,状态照常增长)。
+ *
  * 设计文档:C:\Users\hugua\project-codes\experiment\opencode-acp\PORT_TO_PI_DESIGN.md
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -236,20 +243,37 @@ interface AlignmentRow {
  * 复刻 pi 的 entry→messages 投影,返回与 context 事件 event.messages 位置 1:1
  * 对应的对齐行序列。
  *
- * pi ≥0.99 投影规则(dist/core/session-manager.js sessionEntryToContextMessages):
+ * pi ≥1.0 投影规则(dist/core/session-manager.js buildSessionProjection /
+ * sessionEntryToContextMessages):
  *   - message:        → [message],但 role=system 被 context 事件过滤(不占行)
  *   - custom_message: → 1 条 role=custom 消息
  *   - branch_summary: → summary 存在时 1 条 role=branchSummary 消息
  *   - compaction:     → systemMessage(role=system,被过滤)+ summary(role=compactionSummary)
+ *   - context_edit:   → 本身 0 条;replacement=null 时其 targetId 条目也 0 条(pi 恢复
+ *                       逻辑用它在重试前删除失败的 assistant 消息);非 null 替换仍 1:1
  *   - 其他(custom 等): → 0 条
- * 一旦 pi 投影规则再变,aligned 守卫仍会兜底(放弃注入而不是错位注入)。
+ * 注意:必须复刻 buildSessionProjection(应用 context_edit)而不是只复刻
+ * sessionEntryToContextMessages(buildContextEntries 不解析 edit)。一旦 pi 投影规则
+ * 再变,aligned 守卫仍会兜底(放弃注入而不是错位注入)。
  */
 function getAlignmentRows(ctx: ExtensionContext): AlignmentRow[] {
 	const all = ctx.sessionManager.buildContextEntries() as any[];
+	// context_edit 解析:targetId → 最新一条 edit(投影按顺序后写覆盖,与
+	// buildSessionProjection 的 edits.set 一致);replacement=null 表示该条目被整体删除
+	const removedByEdit = new Set<string>();
+	for (const e of all) {
+		if (e?.type === "context_edit" && typeof e.targetId === "string") {
+			if (e.replacement === null) removedByEdit.add(e.targetId);
+			else removedByEdit.delete(e.targetId);
+		}
+	}
 	const rows: AlignmentRow[] = [];
 	for (const e of all) {
 		if (!e) continue;
+		if (e.type === "context_edit") continue; // edit 条目本身不占消息行
 		const id = typeof e.id === "string" ? e.id : null;
+		// 被 context_edit(replacement=null)删除的条目:投影为 0 条消息,不占行
+		if (id && removedByEdit.has(id)) continue;
 		if (e.type === "message") {
 			const m = e.message;
 			if (!m || m.role === "system") continue; // context 事件不含 system 消息
@@ -859,6 +883,11 @@ export default function acpExtension(pi: ExtensionAPI): void {
 
 		// 位置对应守卫:若不一致(pi 投影规则再变/异常情况),跳过 prune 保守处理,不注入标签
 		const aligned = rows.length === msgs.length;
+		if (!aligned && process.env.ACP_DEBUG) {
+			// 静默失效比报错更危险:压缩“成功”但出站不缩。留一条诊断口(2026-10-03
+			// context_edit 事故的教训:一条网络错误就能让 aligned 永久 false 且无人知晓)
+			console.error(`[acp] ALIGNMENT BROKEN: rows=${rows.length} msgs=${msgs.length} — prune & id-tag injection disabled this request`);
+		}
 
 		// prune + 注入 acp-id 标签(单循环完成:先决定保留,保留则就地注入标签)
 		const refByEntryId = buildRefMap(rows);
