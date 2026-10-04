@@ -13,5 +13,6 @@
     "npm:pi-sessions"
   ],
   "steeringMode": "all",
-  "followUpMode": "all"
+  "followUpMode": "all",
+  "showCacheMissNotices": true
 }

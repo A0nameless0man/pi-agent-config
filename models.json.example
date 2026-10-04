@@ -106,10 +106,22 @@
             "zaiToolStream": true
           },
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
+            "input": 0.429,
+            "output": 2,
+            "cacheRead": 0.086,
+            "cacheWrite": 0.429,
+            "tiers": [
+              {
+                "input": 0.571,
+                "output": 2.286,
+                "cacheRead": 0.114,
+                "cacheWrite": 0.571,
+                "inputTokensAbove": 32768
+              }
+            ]
+          },
+          "promptCache": {
+            "short": 300
           }
         },
         {
@@ -137,10 +149,13 @@
             "zaiToolStream": true
           },
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
+            "input": 1.143,
+            "output": 4,
+            "cacheRead": 0.286,
+            "cacheWrite": 1.143
+          },
+          "promptCache": {
+            "short": 300
           }
         },
         {
@@ -169,10 +184,13 @@
             "zaiToolStream": true
           },
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
+            "input": 0.114,
+            "output": 0.4,
+            "cacheRead": 0.033,
+            "cacheWrite": 0.114
+          },
+          "promptCache": {
+            "short": 300
           }
         }
       ]
@@ -199,10 +217,22 @@
             "zaiToolStream": true
           },
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
+            "input": 0.429,
+            "output": 2,
+            "cacheRead": 0.086,
+            "cacheWrite": 0.429,
+            "tiers": [
+              {
+                "input": 0.571,
+                "output": 2.286,
+                "cacheRead": 0.114,
+                "cacheWrite": 0.571,
+                "inputTokensAbove": 32768
+              }
+            ]
+          },
+          "promptCache": {
+            "short": 300
           }
         },
         {
@@ -230,10 +260,13 @@
             "zaiToolStream": true
           },
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
+            "input": 1.143,
+            "output": 4,
+            "cacheRead": 0.286,
+            "cacheWrite": 1.143
+          },
+          "promptCache": {
+            "short": 300
           }
         },
         {
@@ -262,10 +295,13 @@
             "zaiToolStream": true
           },
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
+            "input": 0.114,
+            "output": 0.4,
+            "cacheRead": 0.033,
+            "cacheWrite": 0.114
+          },
+          "promptCache": {
+            "short": 300
           }
         }
       ]
@@ -292,10 +328,22 @@
             "zaiToolStream": true
           },
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
+            "input": 0.429,
+            "output": 2,
+            "cacheRead": 0.086,
+            "cacheWrite": 0.429,
+            "tiers": [
+              {
+                "input": 0.571,
+                "output": 2.286,
+                "cacheRead": 0.114,
+                "cacheWrite": 0.571,
+                "inputTokensAbove": 32768
+              }
+            ]
+          },
+          "promptCache": {
+            "short": 300
           }
         },
         {
@@ -323,10 +371,13 @@
             "zaiToolStream": true
           },
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
+            "input": 1.143,
+            "output": 4,
+            "cacheRead": 0.286,
+            "cacheWrite": 1.143
+          },
+          "promptCache": {
+            "short": 300
           }
         },
         {
@@ -355,10 +406,13 @@
             "zaiToolStream": true
           },
           "cost": {
-            "input": 0,
-            "output": 0,
-            "cacheRead": 0,
-            "cacheWrite": 0
+            "input": 0.114,
+            "output": 0.4,
+            "cacheRead": 0.033,
+            "cacheWrite": 0.114
+          },
+          "promptCache": {
+            "short": 300
           }
         }
       ]
