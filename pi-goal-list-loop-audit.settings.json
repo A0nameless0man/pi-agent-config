@@ -1,3 +1,4 @@
 {
-  "subagentHangEscalationMinutes": 0
+  "subagentHangEscalationMinutes": 0,
+  "unsupervisedErrorRetry": false
 }
