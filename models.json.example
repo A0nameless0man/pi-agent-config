@@ -121,7 +121,7 @@
             ]
           },
           "promptCache": {
-            "short": 300
+            "short": 600
           }
         },
         {
@@ -155,7 +155,7 @@
             "cacheWrite": 1.143
           },
           "promptCache": {
-            "short": 300
+            "short": 600
           }
         },
         {
@@ -190,7 +190,7 @@
             "cacheWrite": 0.114
           },
           "promptCache": {
-            "short": 300
+            "short": 600
           }
         }
       ]
@@ -232,7 +232,7 @@
             ]
           },
           "promptCache": {
-            "short": 300
+            "short": 600
           }
         },
         {
@@ -266,7 +266,7 @@
             "cacheWrite": 1.143
           },
           "promptCache": {
-            "short": 300
+            "short": 600
           }
         },
         {
@@ -301,7 +301,7 @@
             "cacheWrite": 0.114
           },
           "promptCache": {
-            "short": 300
+            "short": 600
           }
         }
       ]
@@ -343,7 +343,7 @@
             ]
           },
           "promptCache": {
-            "short": 300
+            "short": 600
           }
         },
         {
@@ -377,7 +377,7 @@
             "cacheWrite": 1.143
           },
           "promptCache": {
-            "short": 300
+            "short": 600
           }
         },
         {
@@ -412,7 +412,7 @@
             "cacheWrite": 0.114
           },
           "promptCache": {
-            "short": 300
+            "short": 600
           }
         }
       ]
