@@ -14,5 +14,10 @@
   ],
   "steeringMode": "all",
   "followUpMode": "all",
-  "showCacheMissNotices": true
+  "showCacheMissNotices": true,
+  "sessions": {
+    "autoTitle": {
+      "model": "zhipu/glm-4.7"
+    }
+  }
 }
