@@ -154,6 +154,47 @@ const SH_MAX_TIMEOUT_MS = 30 * 60_000;
 const SH_OUTPUT_CAP = 256 * 1024; // 256KB,超限保留头尾
 const SLEEP_MAX_MS = 60 * 60_000;
 
+// ---------------------------------------------------------------------------
+// 任务脚本前奏:对象返回值守卫
+//
+// 宿主 execute() 的返回值以 JSON.stringify 跨界(pi-codemode host.js),方法与
+// Symbol 键无法随行,守卫只能在沙箱内注入;而 prelude 用 defineProperty 安装
+// 全局(writable/configurable 均为 false),脚本无法重赋值包装——唯一干净的做法
+// 是在脚本体前插一段同作用域前奏(worker 把脚本插值进 (async (tools,console)=>{…}),
+// const 声明即可遮蔽全局)。只遮蔽脚本未自行声明同名标识符的原语,不改既有脚本语义。
+// 背景:2026-10-04 一次 TTL 探测里 res.stdout 误用导致四个监视点全部静默解析为空。
+// ---------------------------------------------------------------------------
+
+const OBJECT_RETURNING_PRIMITIVES = ["emit", "alert", "sleep", "sh", "status", "recv"];
+
+const SANDBOX_PROLOGUE_HELPERS = `
+const __bgTaskGuard = (name, raw) => async (...args) => {
+    const r = await raw(...args);
+    if (r && typeof r === "object") {
+        try {
+            Object.defineProperty(r, Symbol.toPrimitive, {
+                value() {
+                    throw new TypeError(name + "() 返回对象,不能当字符串用;请取属性(sh 取 .output/.exit_code/.truncated),不要 String()/模板字符串/拼接");
+                },
+                configurable: true,
+            });
+        } catch {}
+    }
+    return r;
+};
+`;
+
+export function buildTaskScript(script: string): string {
+    const declared = new Set<string>();
+    for (const m of script.matchAll(/\b(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g)) {
+        declared.add(m[1]);
+    }
+    const shadows = OBJECT_RETURNING_PRIMITIVES.filter((n) => !declared.has(n))
+        .map((n) => `const ${n} = __bgTaskGuard("${n}", globalThis.${n});`);
+    if (shadows.length === 0) return script;
+    return `${SANDBOX_PROLOGUE_HELPERS}${shadows.join("\n")}\n${script}`;
+}
+
 function resolveShell(): string {
     if (process.platform === "win32") {
         const gitBash = "C:\\Program Files\\Git\\bin\\bash.exe";
@@ -315,7 +356,7 @@ export async function runTaskSandbox(
             },
         ];
         sandbox = new CodemodeSandbox({ globals: primitives, timeoutMs: Infinity });
-        const result = await sandbox.execute(script, { signal: record.abort.signal, store: record.store });
+        const result = await sandbox.execute(buildTaskScript(script), { signal: record.abort.signal, store: record.store });
         const textOf = (output: { type: string; text?: string }[]) =>
             output
                 .filter((i) => i.type === "text" && typeof i.text === "string")

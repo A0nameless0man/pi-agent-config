@@ -5,8 +5,9 @@
 // (唤醒 agent) / await sleep(ms) / await sh(cmd) / status() / recv()
 // 纪律:探针原始输出只留在沙箱内,永不进对话;告警 msg 只放短结论,大材料 paths 给路径。
 // 坑:sh(cmd) 返回的是 {exit_code, output, truncated} 对象,不是字符串——
-//    取 stdout 一律用 r.output;写成 String(r) 会得到 "[object Object]",解析全空且
-//    不报错,监视器会静默失效(emit 里除 iter 外字段全空即此症状)。
+//    取 stdout 一律用 r.output,并检查 r.exit_code / r.truncated;String(r)/模板字符串化
+//    会直接抛 TypeError(2026-10-05 起 bg-task 前奏守卫;旧运行时为静默 "[object Object]",
+//    解析全空不报错,emit 里除 iter 外字段全空即此症状)。
 
 // ═══════════ 配置区(按实验改这里) ═══════════
 const CFG = {

@@ -90,6 +90,8 @@ const result = await sandbox.execute(scriptCode, { signal, store });
 
 定案(2026-09-30):codemode 单栈,watchdog 一并改写(§4),双栈权衡表降级为历史参考(解释了为何当初考虑保留 bash guest)。
 
+**对象返回值守卫(2026-10-05 追加)**:宿主 execute() 返回值以 JSON.stringify 跨界(host.js),Symbol 键与方法无法随行,而 prelude 用 defineProperty 安装全局(writable/configurable 均 false)脚本不可重赋值——故在脚本体前插入同作用域前奏(sandbox-host.ts `buildTaskScript`,worker 把脚本插值进 `(async (tools,console)=>{…})`),对六个返回对象的原语 emit/alert/sleep/sh/status/recv 做 const 遮蔽包装,结果上挂抛错的 Symbol.toPrimitive:String(res)/模板字符串化/拼接直接 TypeError。只遮蔽脚本未自行声明的同名标识符(声明名 regex 预扫描),不改既有脚本语义。动机:2026-10-04 一次 TTL 探测误用 res.stdout,四个监视点全部静默解析为空。
+
 ## 4. watchdog 重定位(2026-09-30 定案:改写为 bg-task 消费者,bash 引擎退役)
 
 用户定案:**单栈 codemode guest,watchdog 改写为使用 bg-task 实现**(理由:可移植性——js 全平台一致,bash+Git Bash 有平台怪癖)。原"引擎不动只换传输层"决策反转,watchdog.sh 不再加 `--emit jsonl`,其引擎/调度/状态目录/退出码协议随重写退役。watchdog skill 重定位为薄层,提供三样东西:

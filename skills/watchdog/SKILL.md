@@ -62,10 +62,10 @@ description: 长时间任务（大型编译、机器学习训练、自动消融�
 ## 边界与注意
 
 - **`sh()` 返回对象,不是字符串**:`await sh(cmd)` → `{exit_code, output, truncated}`。取 stdout 必须
-  用 `res.output`;对返回值做 `String(res)` 得到 `"[object Object]"`,按行解析会全部落空——
-  **不报错、不告警、监视器静默失效**(2026-10-04 实测:一次实验中四个临时监视器全部漏报,
-  用户不来问就永远不知道任务已结束)。自写探针聚合一律照 `scheduler.js.tmpl` 的写法,并检查
-  `res.exit_code` / `res.truncated`。判据:emit 里除 `iter` 之外字段全空 = 解析失败。
+  用 `res.output`,并检查 `res.exit_code` / `res.truncated`。2026-10-05 起 bg-task 前奏已给对象
+  返回值挂抛错的 Symbol.toPrimitive——`String(res)`/模板字符串化/拼接直接抛 TypeError(此前
+  是静默 `[object Object]`,按行解析全部落空且不报错,2026-10-04 实测四个临时监视器全部漏报)。
+  判据(旧版行为):emit 里除 `iter` 之外字段全空 = 解析失败。
 - **追加日志的陈旧终态标记**:探针统计 done/fail 行数时,若日志是追加写入的(launch 日志通常如此),
   上一轮运行留下的 done 行会让新任务**一启动就被判定为已完成**。只统计**最后一次 start 标记之后**
   的行(先 `grep -n '^=== .* start' | tail -1` 取行号,再 `tail -n +N`)。
