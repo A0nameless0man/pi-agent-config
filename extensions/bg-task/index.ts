@@ -78,7 +78,8 @@ const GUARD_MAX_VETOES = 3;
 const TASK_DESCRIPTION_HINT =
     "任务脚本(js,async function body,支持顶层 await)在 QuickJS 沙箱内长驻运行;" +
     "通道原语为顶层裸函数:emit(data)(信息级采样,不打扰)/await alert({code,sev,msg,paths})(唤醒 agent)/await sleep(ms)/await sh(cmd,{cwd,timeout_ms})(bash 探针,输出只留沙箱)/status()/recv(收 agent 消息)。" +
-    "推荐结构:js 只做调度与告警决策,复杂检查写成 bash 脚本由 sh 驱动。";
+    "推荐结构:js 只做调度与告警决策,复杂检查写成 bash 脚本由 sh 驱动。" +
+    "await sh(cmd) 返回对象 {exit_code, output, truncated} 而非字符串——stdout 取 res.output,按字符串解析会全空且静默失效,行尾可能带 CRLF;alert 的 code 不可为 0 或空(falsy 判缺参直接抛错)。";
 
 // ---------------------------------------------------------------------------
 // 工厂
