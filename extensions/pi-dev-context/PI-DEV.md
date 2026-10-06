@@ -37,6 +37,10 @@ Windows（改模板/加 skill/插件源码）
 - refresh 自动检测激活 profile 并从模板重新生成实际文件
 - packages 新增（如 `npm:pi-sessions`）要写进 `settings.json.example` 的 packages 数组，
   各机 pull + refresh 后 pi 启动时自动安装（或手动 `pi install npm:<pkg>`）
+- **`pi-sessions` 已改为自维护 fork**：`git:github.com/A0nameless0man/pi-sessions`（原 `npm:pi-sessions`）。
+  fork 上两个补丁 commit：标题输入文本化+遵循 ACP 压缩状态、失败请求落盘。上游发版后在该仓库
+  `git fetch upstream && git rebase upstream/main && git push origin main`，各机 pull + refresh 即生效
+  （pi 的 git 包跟踪 main，改完必须 push 才装得到；重装/更新用 `pi update git:github.com/A0nameless0man/pi-sessions`）
 - github.com:443 在部分内网机器**间歇性阻断**：pull 失败静默重试 2-3 轮（GnuTLS -110 /
   超时属预期）；install.sh HTTPS 克隆失败会自动退试 SSH remote，也可 `PI_AGENT_REPO_URL` 覆盖
 
