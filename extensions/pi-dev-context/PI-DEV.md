@@ -75,6 +75,9 @@ ssh <host> 'ZKEY=$(sed -n 1p /tmp/.pi-sync-keys); OVK=$(sed -n 2p /tmp/.pi-sync-
 - **OpenViking 双扩展共存**：官方扩展（`extensions/openviking/`，git 跟踪）负责 recall/捕获/commit，读 `~/.openviking/ovcli.conf`；openviking-memory 走 toolsOnly（仅 memwrite/memimport），读 `openviking-config.json`。旧机器升级后需手动补 `~/.openviking/ovcli.conf`（install.sh 只在冷启动时生成）
 - Windows 无 tmux：pi-sessions 需 `sessions.subagents.enable:false`（本地 settings.json 覆盖，
   不进模板）；Linux 机器全功能
+- **auto-title 不 pin 模型**（去掉 `sessions.autoTitle.model`，用当前会话模型）：pin 一个
+  端点挂掉/余额不足的模型时，解析期不失败而请求期失败，标题会静默停更。反过来，zhipu 机器上
+  若当前会话模型是 glm-5.3\*，需临时 pin（zai 格式发 `thinking:{type:disabled}` 被该系拒为 1210）
 
 ### 提交规范
 
