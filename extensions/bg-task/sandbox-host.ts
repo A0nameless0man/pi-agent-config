@@ -110,7 +110,8 @@ function findPiRoot(startFile: string): string | undefined {
 
 /**
  * 解析 pi-codemode 的 dist 入口绝对路径。
- * 锚点:process.argv[1](pi 的 cli.js;npm 安装形态)向上找包根。
+ * 锚点:process.argv[1] 先 realpath 再向上找包根(npm 形态下 argv[1] 是 bin 符号链接,
+ * 必须解析到包内 cli.js 才能命中包根)。
  * 失败场景:pi 以编译单文件形态运行(无 node_modules)→ 返回 undefined,上层优雅降级。
  */
 export function resolveCodemodeEntry(): string | undefined {
@@ -119,7 +120,16 @@ export function resolveCodemodeEntry(): string | undefined {
     // 嵌入式/二进制形态兜底:execPath 附近也可能有安装树
     candidates.push(process.execPath);
     for (const start of candidates) {
-        const root = findPiRoot(start);
+        // npm 全局安装形态下 bin 入口是符号链接(/usr/local/bin/pi → 包内 cli.js),
+        // 而 node 不改写 argv[1] 的符号链接路径 —— 不做 realpath 的话向上找包根
+        // 会止步于 /usr/local,永远摸不到 node_modules 安装树(2026-10-08 实测)
+        let resolved = path.resolve(start);
+        try {
+            resolved = fs.realpathSync(resolved);
+        } catch {
+            // 候选路径不存在(嵌入式形态)时按原路径继续
+        }
+        const root = findPiRoot(resolved);
         if (!root) continue;
         const entry = path.join(root, CODEMODE_REL);
         if (fs.existsSync(entry)) return entry;

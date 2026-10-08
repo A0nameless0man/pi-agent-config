@@ -183,6 +183,13 @@ bg-task 模型取消阻塞后,子代理 `task_start` 完就会返回,pi-subagent
 - 前置预警链也应验:13:31:03 起每 5min 节流 `subagent_hang_detected`(silentMs 300280/911989/1217428/…)。
 - 结论:GLLA hang 升级是唯一的 30min 杀手(§5.3.1),AGENTS.md 误记已在同日纠正。bg-task 的 join(§5.3)+ 30min 约束解除(配置项或 GLA 豁免功能,§7-4)即为此约束的系统性解。
 
+## 9.1 pi-codemode 解析修复:argv[1] 符号链接必须 realpath(2026-10-08)
+
+- **现象**:会话启动报 "pi-codemode runtime not found (pi must be installed via npm ...)"。pi 本体与 codemode 工具均正常(嵌套副本在),仅 bg-task 的自定义解析器失效。
+- **根因**:`resolveCodemodeEntry()` 从 `process.argv[1]` 向上找 pi-coding-agent 包根,但 npm 全局安装的 bin 入口是符号链接(`/usr/local/bin/pi → ../lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js`),且 node 不改写 argv[1](实测确认)——向上遍历止步于 /usr/local,永远摸不到 node_modules 安装树。报错文案里 "must be installed via npm" 是误导:pi 恰恰是 npm 装的。
+- **修复**:候选路径先 `fs.realpathSync` 再向上找包根(sandbox-host.ts)。嵌套副本 `pi-coding-agent/node_modules/@earendil-works/pi-codemode` 由 npm 依赖树保证存在,双场景(argv[1]=符号链接 / 真实 cli.js)jiti 实测 PASS。
+- **排障弯路**:曾误判为全局树缺包并 `npm i -g pi-codemode` 补装——该解析器只在找到包根后才在包内找嵌套副本,平级全局副本帮不上忙,已卸载还原。
+
 ## 10. 参考
 
 - pi 0.99.0/0.99.1 CHANGELOG:github.com/earendil-works/pi(packages/coding-agent/CHANGELOG.md)
