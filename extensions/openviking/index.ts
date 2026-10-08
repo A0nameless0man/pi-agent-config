@@ -54,6 +54,46 @@ export default async function (pi: ExtensionAPI) {
   let started = false;
   let startPromise: Promise<void> | null = null;
 
+  // LOCAL PATCH (hugua, 2026-10-08): OV sync must never block a pi turn.
+  // Root cause it guards: when the OV commit queue jams (session_commit requeue
+  // storm, see PI-DEV.md), every message POST stalls the full 10s client timeout.
+  // turn_end used to await syncBranch -> N x 10s with the spinner spinning and no
+  // model request ever dispatched (pi looked hung for 13+ minutes). Sync now runs
+  // in the background, guarded against re-entry, with a failure cooldown breaker.
+  let syncInFlight = false;
+  let syncCooldownUntil = 0;
+  let syncFailStreak = 0;
+  const SYNC_COOLDOWN_BASE_MS = 120_000;
+  const SYNC_COOLDOWN_MAX_MS = 15 * 60_000;
+
+  const runSyncInBackground = (branch: any[], ctx: any, label: string): void => {
+    if (syncInFlight) return;
+    if (Date.now() < syncCooldownUntil) return;
+    syncInFlight = true;
+    void (async () => {
+      try {
+        const result = await sync.syncBranch(branch);
+        debugLog(`${label}: synced ${result.added} entries, ~${result.tokens} tokens`);
+        await takeover.onTurnSynced(result.tokens);
+        if (result.added > 0 && !result.allDelivered) {
+          throw new Error("payloads enqueued, not delivered");
+        }
+        syncFailStreak = 0;
+        syncCooldownUntil = 0;
+        updateStatus(ctx, connected, result.added, sync.sessionId, config, takeover.state);
+      } catch (err) {
+        syncFailStreak += 1;
+        syncCooldownUntil =
+          Date.now() + Math.min(SYNC_COOLDOWN_MAX_MS, SYNC_COOLDOWN_BASE_MS * 2 ** (syncFailStreak - 1));
+        debugLog(
+          `${label}: sync failed (${String(err)}); pausing sync ${Math.round((syncCooldownUntil - Date.now()) / 1000)}s`,
+        );
+      } finally {
+        syncInFlight = false;
+      }
+    })();
+  };
+
   // ================================================================
   // Event Handlers
   // ================================================================
@@ -109,7 +149,10 @@ export default async function (pi: ExtensionAPI) {
         }
         return;
       }
-      await sync.replayPending();
+      // LOCAL PATCH (hugua, 2026-10-08): never await the replay loop. It posts up to
+      // OPENVIKING_PENDING_REPLAY_LIMIT (50) items at a 10s timeout each, so a jammed
+      // OV server blocked session start for minutes before the first prompt ran.
+      void sync.replayPending().catch((err) => debugLog(`replayPending: ${String(err)}`));
 
       // Profile injection
       profileBlock = await buildSessionProfileBlock(client, config);
@@ -196,14 +239,13 @@ export default async function (pi: ExtensionAPI) {
   });
 
   // --- turn_end ---
-  pi.on("turn_end", async (event, ctx) => {
+  pi.on("turn_end", async (_event, ctx) => {
     if (!connected || bypassed || !config.syncTurns) return;
 
+    // LOCAL PATCH (hugua, 2026-10-08): capture the branch synchronously, sync off the
+    // turn path. An awaited sync here is what froze pi whenever OV stalled.
     const branch = ctx.sessionManager.getBranch();
-    const result = await sync.syncBranch(branch);
-    debugLog(`turn_end: synced ${result.added} entries, ~${result.tokens} tokens`);
-    await takeover.onTurnSynced(result.tokens);
-    updateStatus(ctx, connected, result.added, sync.sessionId, config, takeover.state);
+    runSyncInBackground(branch, ctx, "turn_end");
   });
 
   // --- session_before_compact ---
@@ -261,7 +303,11 @@ export default async function (pi: ExtensionAPI) {
 
       if (args?.trim() === "commit") {
         await sync.shutdown();
-        const commitResult = config.takeoverEnabled ? null : await sync.commit();
+        // An explicit user command must not be silently suppressed by the
+        // commitMaxPendingTokens guard, so force it through.
+        const commitResult = config.takeoverEnabled
+          ? null
+          : await sync.commit({ force: true });
         const ok = config.takeoverEnabled
           ? await takeover.commitAndAdvance()
           : commitResult !== null;

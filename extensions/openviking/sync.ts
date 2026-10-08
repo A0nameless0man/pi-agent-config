@@ -106,17 +106,56 @@ export class SyncManager {
     return { accepted: true, delivered: false };
   }
 
+  /** Live pending-token count for this session, as the server reports it. */
+  private async pendingTokens(): Promise<number> {
+    if (!this.ovSessionId) return 0;
+    const meta = await this.client.getSession(this.ovSessionId);
+    return Number(meta?.pending_tokens || 0);
+  }
+
+  /**
+   * LOCAL PATCH (hugua, 2026-10-08): never fire a commit the extraction model
+   * cannot swallow. The local extraction model serves 262144 tokens; a larger
+   * input fails with HTTP 400, and because a failed commit never advances the
+   * watermark the next attempt is even bigger - that is how the OV queue ended
+   * up with a 3M-requeue storm and 13-minute pi freezes.
+   *
+   * Every commit path must honour this cap. Only the turn_end path used to be
+   * guarded, while session_shutdown and session_before_compact called commit()
+   * directly and flushed an over-cap backlog as one giant request - exactly the
+   * request that 400s. commit() now self-guards; pass force for a commit the
+   * user asked for explicitly.
+   */
+  private async overPendingCap(pending?: number): Promise<boolean> {
+    const cap = Number(this.config.commitMaxPendingTokens || 0);
+    if (cap <= 0) return false;
+    const value = pending ?? (await this.pendingTokens());
+    if (value > cap) {
+      debugLog(`commit skipped: pending ${value} > commitMaxPendingTokens ${cap}`);
+      return true;
+    }
+    return false;
+  }
+
   async commitIfNeeded(): Promise<void> {
     if (!this.ovSessionId) return;
-    const meta = await this.client.getSession(this.ovSessionId);
-    const pending = Number(meta?.pending_tokens || 0);
+    const pending = await this.pendingTokens();
+    if (await this.overPendingCap(pending)) return;
     if (pending >= this.config.commitTokenThreshold) {
-      await this.commit();
+      await this.commit({ pendingTokens: pending });
     }
   }
 
-  async commit(opts: { queueOnFailure?: boolean; keepRecentCount?: number } = {}): Promise<any | null> {
+  async commit(opts: {
+    queueOnFailure?: boolean;
+    keepRecentCount?: number;
+    /** Skip the commitMaxPendingTokens guard. Reserved for explicit user commands. */
+    force?: boolean;
+    /** Pending count already fetched by the caller, to avoid a second round trip. */
+    pendingTokens?: number;
+  } = {}): Promise<any | null> {
     if (!this.ovSessionId) return null;
+    if (!opts.force && (await this.overPendingCap(opts.pendingTokens))) return null;
     const response = await this.client.commitSessionResponse(
       this.ovSessionId,
       opts.keepRecentCount,

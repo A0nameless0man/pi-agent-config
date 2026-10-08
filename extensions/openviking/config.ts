@@ -31,6 +31,8 @@ export interface OVConfig {
   resumeContextBudget: number;
   commitTokenThreshold: number;
   commitKeepRecentCount: number;
+  /** LOCAL PATCH (hugua): skip commits whose pending backlog exceeds this many tokens. */
+  commitMaxPendingTokens: number;
   takeoverEnabled: boolean;
   takeoverTokenThreshold: number;
   takeoverKeepRecentTurns: number;
@@ -72,6 +74,7 @@ const DEFAULT_CONFIG: OVConfig = {
   resumeContextBudget: 32000,
   commitTokenThreshold: 20000,
   commitKeepRecentCount: 10,
+  commitMaxPendingTokens: 200000,
   takeoverEnabled: true,
   takeoverTokenThreshold: 30000,
   takeoverKeepRecentTurns: 3,
@@ -154,6 +157,12 @@ export function loadConfig(extensionDir: string): OVConfig {
   config.resumeContextBudget = clampInt(config.resumeContextBudget, 1024, 128000, DEFAULT_CONFIG.resumeContextBudget);
   config.commitTokenThreshold = clampInt(config.commitTokenThreshold, 1000, 1000000, DEFAULT_CONFIG.commitTokenThreshold);
   config.commitKeepRecentCount = clampInt(config.commitKeepRecentCount, 0, 1000, DEFAULT_CONFIG.commitKeepRecentCount);
+  config.commitMaxPendingTokens = clampInt(
+    config.commitMaxPendingTokens,
+    0,
+    10000000,
+    DEFAULT_CONFIG.commitMaxPendingTokens,
+  );
   config.takeoverEnabled = config.takeoverEnabled !== false;
   config.takeoverTokenThreshold = clampInt(config.takeoverTokenThreshold, 1, 1000000, DEFAULT_CONFIG.takeoverTokenThreshold);
   config.takeoverKeepRecentTurns = clampInt(config.takeoverKeepRecentTurns, 0, 100, DEFAULT_CONFIG.takeoverKeepRecentTurns);

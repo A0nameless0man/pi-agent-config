@@ -9,6 +9,7 @@
   "profileTokenBudget": 10000,
   "resumeContextBudget": 32000,
   "commitTokenThreshold": 20000,
+  "commitMaxPendingTokens": 200000,
   "commitKeepRecentCount": 10,
   "takeover": {
     "enabled": false,
