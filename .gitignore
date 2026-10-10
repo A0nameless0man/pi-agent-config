@@ -30,6 +30,9 @@ extensions/openviking-memory/openviking-session-map.json
 npm/
 git/
 bin/fd.exe
+# pi 自身安装产物(安装器生成的 PATH shim 与 releases),机器本地,不入库
+bin/pi*
+install/
 
 # ---- 运行时状态文件 ----
 .glla-subagent-sync.json
