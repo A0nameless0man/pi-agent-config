@@ -186,6 +186,14 @@ graph TD
 
 ---
 
+## 第三方扩展私有 fork 约定（用户指定）
+
+GitHub 账号 `A0nameless0man` 下维护第三方 pi 扩展的私有 fork，用于在上游破损或缺失修复时承载本地补丁。约定：fork 的 `main` = 上游镜像（只 fast-forward）；补丁一律走 `fix/<topic>` 分支，上游吸收或自行解决后删除分支。当前存在的 fork：
+
+-   `A0nameless0man/pi-goal-list-loop-audit`（glla）。历史补丁（Windows .cmd spawn、abort 续跑）均已被上游吸收，当前零补丁，settings.json 直指上游 `git:github.com/DraconDev/pi-goal-list-loop-audit`；上游再出致命 bug 时，修复落在 fork 分支并把 settings 指到 `git:github.com/A0nameless0man/pi-goal-list-loop-audit@<branch>`（`@` 后缀 pin 分支，防 pi 自动 reset 回坏 main）
+
+---
+
 ## pi 环境速览
 
 ### 常用斜杠命令
