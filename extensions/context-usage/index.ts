@@ -194,9 +194,14 @@ export default function contextUsageExtension(pi: ExtensionAPI): void {
 	// Inject ONE factual usage line per turn, model-only (display: false).
 	pi.on("before_agent_start", async (event, ctx) => {
 		try {
+			// pi ≥1.2.0: before_agent_start 也对扩展触发的 run 触发,custom 事件
+			// 只带 message 不带 prompt(union on messageType)。归一化为空串,
+			// 让所有 custom run 共享同一个节流 key,避免 lastPrompt 被写成
+			// undefined 后 60s 内连续 custom run 全部漏注入。
+			const prompt = event.prompt ?? "";
 			// Idempotency guard: survive compaction retries / follow-ups that
 			// re-fire this event with the same prompt.
-			if (event.prompt === lastPrompt && Date.now() - lastInjectedAt < INJECTION_THROTTLE_MS) {
+			if (prompt === lastPrompt && Date.now() - lastInjectedAt < INJECTION_THROTTLE_MS) {
 				return;
 			}
 
@@ -212,7 +217,7 @@ export default function contextUsageExtension(pi: ExtensionAPI): void {
 					`Context window: ${window.toLocaleString()} tokens.`;
 			}
 
-			lastPrompt = event.prompt;
+			lastPrompt = prompt;
 			lastInjectedAt = Date.now();
 
 			return {
