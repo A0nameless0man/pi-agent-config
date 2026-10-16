@@ -190,6 +190,16 @@ bg-task 模型取消阻塞后,子代理 `task_start` 完就会返回,pi-subagent
 - **修复**:候选路径先 `fs.realpathSync` 再向上找包根(sandbox-host.ts)。嵌套副本 `pi-coding-agent/node_modules/@earendil-works/pi-codemode` 由 npm 依赖树保证存在,双场景(argv[1]=符号链接 / 真实 cli.js)jiti 实测 PASS。
 - **排障弯路**:曾误判为全局树缺包并 `npm i -g pi-codemode` 补装——该解析器只在找到包根后才在包内找嵌套副本,平级全局副本帮不上忙,已卸载还原。
 
+## 9.2 Windows releases 布局提升依赖 + 失败缓存两大修复(2026-10-16)
+
+- **现象**:bg_task_start 秒败,同 9.1 报错文案。本次在 Windows、pi 1.1.0 managed 安装(releases 布局):`~/.pi/agent/install/releases/1.1.0/node_modules/` 下平级放着全部 @earendil-works 包。
+- **根因一(路径)**:`resolveCodemodeEntry()` 找到包根 `pi-coding-agent/` 后只查嵌套副本 `pi-coding-agent/node_modules/@earendil-works/pi-codemode`。releases 布局把依赖提升到共享 node_modules,包内无嵌套副本→ existsSync 落空。argv[1] 本身没问题(直接就是包内 cli.js,9.1 的 realpath 修复工作正常)。
+- **修复一(根治)**:`resolveCodemodeEntry()` 改为自包根向上走标准 Node 解析，每级查 `<祖先>/node_modules/@earendil-works/pi-codemode/dist/index.js`(上限 8 级)，与 require() 自包内的解析语义一致，任何 npm 提升布局都能命中。jiti 双锚点(argv[1]=bin cli.js / dist cli.js)实测 PASS，且在 junction 已删除状态下验证。
+    - 当日曾先用 NTFS junction 在包内造嵌套副本指向共享层(零代码改动，但 pi 升级换 release 目录即失效，且属机器本地补丁、他机不可复用)——review 后判定修复方向反了：应让解析器认得提升布局，而非机器本地打补丁。junction 已移除。
+- **根因二(缓存)**:`loadCodemode()` 用 `codemodePromise ??= ...` 记住 rejected promise——首次失败后即使文件系统已修好,本进程内 bg-task 也永远起不来,只能重启 pi。实测 junction 建好后同会话 task_start 仍报错。
+- **修复二**:sandbox-host.ts `loadCodemode()` 挂 catch 清缓存(rejected 时把 codemodePromise 置回 undefined),下次 task_start 重新解析。与修复一正交，保留作健壮性兜底。需重启 pi/reload 生效。
+- **降级预案**:两修复均需重启才生效的会话里,用后台子代理跑 watch_loop.sh(单 bash 调用内 30s 轮询、终态即退)代替调度器,当日 tenhou 扫描即此模式完成。
+
 ## 10. 参考
 
 - pi 0.99.0/0.99.1 CHANGELOG:github.com/earendil-works/pi(packages/coding-agent/CHANGELOG.md)

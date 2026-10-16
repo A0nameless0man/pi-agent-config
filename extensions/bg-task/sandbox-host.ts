@@ -131,8 +131,19 @@ export function resolveCodemodeEntry(): string | undefined {
         }
         const root = findPiRoot(resolved);
         if (!root) continue;
-        const entry = path.join(root, CODEMODE_REL);
-        if (fs.existsSync(entry)) return entry;
+        // 自包根向上走标准 Node 解析(每级查 <祖先>/node_modules/…):
+        // npm 布局既可能是嵌套副本(root/node_modules),也可能被提升到任意
+        // 祖先的 node_modules —— Windows managed releases 布局把依赖提升到
+        // 共享层(releases/<ver>/node_modules),包内无嵌套副本,2026-10-16 实测。
+        // 这与 require() 自包内的解析路径一致,任何 npm 提升布局都能命中。
+        let dir = root;
+        for (let i = 0; i < 8; i++) {
+            const entry = path.join(dir, CODEMODE_REL);
+            if (fs.existsSync(entry)) return entry;
+            const parent = path.dirname(dir);
+            if (parent === dir) break;
+            dir = parent;
+        }
     }
     return undefined;
 }
@@ -152,7 +163,14 @@ function loadCodemode() {
         }
         return mod;
     })();
-    return codemodePromise;
+    // 解析失败不得永久缓存:rejected promise 被 ??= 记住后,即便布局已修复
+    // (如补上 junction),本进程内 bg-task 也永远起不来(2026-10-16 实测)。
+    // 挂 catch 清掉缓存,让下次 task_start 重新解析。
+    const p = codemodePromise;
+    p.catch(() => {
+        if (codemodePromise === p) codemodePromise = undefined;
+    });
+    return p;
 }
 
 // ---------------------------------------------------------------------------
