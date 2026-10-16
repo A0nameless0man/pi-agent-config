@@ -359,20 +359,32 @@ done
 
 同理：等待子 agent 结果时用 `get_subagent_result` 主动查询；后台 workflow 完成时会自动通知完成结果，不要 sleep 后假设已完成。
 
-#### 陷阱 4：长命令输出不落盘，失败后被迫重跑
+#### 陷阱 4:长命令输出不落盘,失败后被迫重跑
 
-**根因**：pi bash 工具的 stdout 截断到最后 2000 行 / 50KB，命令失败或超时时中间输出直接丢失。自动化测试、编译、数据迁移这类长命令一旦失败，往往看不到完整报错，只能整条重跑——长命令重跑一次几分钟起步，浪费成倍时间。
+**根因**:pi bash 工具的 stdout 截断到最后 2000 行 / 50KB,命令失败或超时时中间输出直接丢失。自动化测试、编译、数据迁移这类长命令一旦失败,往往看不到完整报错,只能整条重跑——长命令重跑一次几分钟起步,浪费成倍时间。
 
-**必须**：长命令（测试套件、构建、批量处理）一律 `2>&1 | tee <logfile>` 落盘：
+**必须**:长命令(测试套件、构建、批量处理)一律 `2>&1 | tee <logfile>` 落盘:
 
 ```bash
-# 输出同时进终端和日志文件；pipefail 保证拿到真实退出码而非 tee 的
+# 输出同时进终端和日志文件;pipefail 保证拿到真实退出码而非 tee 的
 set -o pipefail
 pytest tests 2>&1 | tee /tmp/pytest.log
 cargo build --release 2>&1 | tee /tmp/build.log
 ```
 
-失败后先 `grep` 日志文件定位报错，再决定是否重跑；完整输出不受工具截断影响。注意 `cmd | tee` 默认返回 tee 的退出码，必须配合 `set -o pipefail` 或 `${PIPESTATUS[0]}` 判断原命令成败，否则失败的命令会被误判为成功。
+失败后先 `grep` 日志文件定位报错,再决定是否重跑;完整输出不受工具截断影响。注意 `cmd | tee` 默认返回 tee 的退出码,必须配合 `set -o pipefail` 或 `${PIPESTATUS[0]}` 判断原命令成败,否则失败的命令会被误判为成功。
+
+#### 陷阱 5:heredoc 内反斜杠字面量被折叠(Windows 路由层,2026-10-16 实测)
+
+**根因**:bash 工具经 Windows 层路由时,`<<'EOF'` heredoc 正文中的 `\\` 会被折叠成 `\`——即便用了引号包裹的 EOF(理论上应禁止展开)。含反斜杠字面量的 Python/正则代码直接报错(`'\\'` 变 `'\'` 引发 unterminated string;`r"\\("` 变 `r"\("` 引发 unbalanced parenthesis),且报错位置迷惑。
+
+**必须**:heredoc 里避免反斜杠字面量——用 write 工具写脚本文件再执行,或代码内用 `os.sep`/`os.path.join`/`chr(92)`/正斜杠构造路径;`python -c` 多行字符串同路由另有命令注入形态(`|| goto :error` 混入),同样禁用。
+
+#### 陷阱 6:nohup 脚本内 grep 自己的日志文件
+
+**根因**:`nohup bash run.sh > run.log 2>&1` 场景下,脚本内 `grep pattern run.log` 的 stdout 也指向 run.log——grep 检测到输入输出同文件,拒绝执行并报错,`||` 守卫分支被误触发(实测把已成功的阶段误判 FATAL)。
+
+**必须**:守卫型 grep 一律加重定向:`grep pattern run.log > /dev/null` 或 `grep -q pattern run.log`。
 
 ---
 
