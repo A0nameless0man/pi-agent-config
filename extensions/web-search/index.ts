@@ -26,12 +26,9 @@
  * header) so a future backend swap does not re-brand the LLM-facing surface.
  */
 
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, Theme, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import { keyHint, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
+import { keyHint, readStoredCredential, truncateToVisualLines } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -93,21 +90,17 @@ interface SearchParams {
 }
 
 /** API key resolution: explicit env var wins; fall back to pi's own
- * credential store — the Search API shares the Bearer key already configured
- * for DeepSeek chat models, so every machine with a working deepseek provider
- * needs zero extra setup. */
+ * credential store via the official one-off reader — the Search API shares
+ * the Bearer key already configured for DeepSeek chat models, so every
+ * machine with a working deepseek provider needs zero extra setup. Reading
+ * through readStoredCredential (not hand-rolled fs parsing) means format
+ * drift (BOM, future storage changes) is handled by pi itself. */
 function resolveApiKey(): string | null {
 	const fromEnv = process.env.DEEPSEEK_API_KEY;
 	if (fromEnv) return fromEnv;
-	try {
-		const auth = JSON.parse(readFileSync(join(homedir(), ".pi", "agent", "auth.json"), "utf8")) as {
-			deepseek?: { key?: unknown };
-		};
-		const key = auth.deepseek?.key;
-		return typeof key === "string" && key ? key : null;
-	} catch {
-		return null;
-	}
+	const cred = readStoredCredential("deepseek");
+	const key = cred?.key;
+	return typeof key === "string" && key ? key : null;
 }
 
 /** Extract the message from DeepSeek's OpenAI-compatible error body
