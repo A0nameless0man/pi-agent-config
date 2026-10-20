@@ -14,5 +14,6 @@
   ],
   "steeringMode": "all",
   "followUpMode": "all",
+  "defaultTools": ["+codemode"],
   "showCacheMissNotices": true
 }
