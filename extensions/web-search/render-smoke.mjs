@@ -1,5 +1,5 @@
 /**
- * Bocha extension render smoke test.
+ * Web-search extension render smoke test (DeepSeek backend).
  *
  * Drives renderCall/renderResult the same way ToolExecutionComponent does in
  * the TUI, with a stub theme + render context, and asserts the bash-style
@@ -37,9 +37,9 @@ pkg.initTheme?.();
 
 const tools = {};
 const stub = { registerTool(t) { tools[t.name] = t; } };
-const mod = await jiti.import("C:/Users/hugua/.pi/agent/extensions/bocha/index.ts", { default: true });
+const mod = await jiti.import("C:/Users/hugua/.pi/agent/extensions/web-search/index.ts", { default: true });
 (mod.default ?? mod)(stub);
-const tool = tools.bocha_web_search;
+const tool = tools.web_search;
 
 let failures = 0;
 const check = (name, cond) => {
@@ -57,7 +57,7 @@ const stubTheme = {
 const fakeResult = {
 	content: [{
 		type: "text",
-		text: ["## Bocha 网页搜索 · 约 100 条结果", "",
+		text: ["## 网页搜索 · 100 条结果", "",
 			...Array.from({ length: 20 }, (_, i) =>
 				`### ${i + 1}. Result title ${i + 1}\n- URL: https://example.com/${i + 1}\n- 来源: site${i + 1}\n\nsummary line ${i + 1}\n`),
 		].join("\n"),
@@ -118,7 +118,7 @@ check("expanded has no hint", !/\(\d+ earlier lines,/.test(expandedText));
 
 // --- error result uses error color ---
 const errComp = tool.renderResult(
-	{ content: [{ type: "text", text: "Bocha web search failed: HTTP 500" }], isError: true },
+	{ content: [{ type: "text", text: "Web search failed: HTTP 500" }], isError: true },
 	{ expanded: false, isPartial: false },
 	stubTheme,
 	{ ...contextBase, lastComponent: undefined, state: {}, isError: true },
@@ -129,7 +129,7 @@ check("error still collapses tail+Took", /Took \d+\.\d+s/.test(errText) || errTe
 
 // --- short output: no hint line ---
 const shortComp = tool.renderResult(
-	{ content: [{ type: "text", text: "## Bocha 网页搜索\n\n_无结果_" }], isError: false },
+	{ content: [{ type: "text", text: "## 网页搜索 · 0 条结果\n\n_无结果_" }], isError: false },
 	{ expanded: false, isPartial: false },
 	stubTheme,
 	{ ...contextBase, lastComponent: undefined, state: { startedAt: Date.now() - 300, endedAt: Date.now() } },

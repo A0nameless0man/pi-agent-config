@@ -69,8 +69,11 @@ ssh <host> 'ZKEY=$(sed -n 1p /tmp/.pi-sync-keys); OVK=$(sed -n 2p /tmp/.pi-sync-
 - **auth.json 格式**：value 必须是对象 `{"key":"...","type":"api_key"}`，裸 string 会导致
   "No models available"
 - **settings.json 不配 shellPath**：显式 Windows 路径会随 git 同步到 Linux 导致 bash 工具失效
-- **环境变量类 key**（如 BOCHA_API_KEY）：各机 `~/.bashrc` 追加 export 并 `chmod 600`，
-  传输同上节中转模式
+- **环境变量类 key**：各机 `~/.bashrc` 追加 export 并 `chmod 600`，
+  传输同上节中转模式。web-search 扩展（DeepSeek Search，2026-10-20 替换 bocha）的 key 解析：
+  `DEEPSEEK_API_KEY` env 优先，缺省回落 auth.json 的 deepseek key（Search API 与 chat
+  模型同一把 Bearer key，配好 deepseek provider 的机器零额外配置）；旧 BOCHA_API_KEY
+  已随 bocha 扩展废弃
 - **gitignored 的本地配置文件**（team.json / openviking-config.json / auth.json）：openviking 相关两个由 install.sh `--ov-endpoint/--ov-key` 直接生成（toolsOnly 形态 + ovcli.conf），其余冷启动后需单独分发
 - **OpenViking 双扩展共存**：官方扩展（`extensions/openviking/`，git 跟踪）负责 recall/捕获/commit，读 `~/.openviking/ovcli.conf`；openviking-memory 走 toolsOnly（仅 memwrite/memimport），读 `openviking-config.json`。旧机器升级后需手动补 `~/.openviking/ovcli.conf`（install.sh 只在冷启动时生成）
 - Windows 无 tmux：pi-sessions 需 `sessions.subagents.enable:false`（本地 settings.json 覆盖，
