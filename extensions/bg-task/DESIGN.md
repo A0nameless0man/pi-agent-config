@@ -146,6 +146,30 @@ bg-task 模型取消阻塞后,子代理 `task_start` 完就会返回,pi-subagent
 
 若 pi-subagents 改动成本过高,备选方案是:任务全部登记在主会话名下,子代理只做搭建即返回,告警统一路由到主会话处理。代价是丢失每实验的上下文隔离,主会话承担全部告警处理。用户当前倾向是正推 §5.3 的子代理存活语义。
 
+### 5.5 子代理完成通知与 join 的兼容性缺口及修复(2026-10-24 实证并修复)
+
+#### 5.5.1 缺口:完成通知不唤醒 join
+
+两条机制的投递路径在 pi core 里分叉,导致"阻塞在 bg_task_join 里的会话感知不到子代理完成通知":
+
+- **join 的唤醒条件**依赖扩展 `input` 事件。pi core 中该事件只在 `AgentSession._queueUserInput` 里触发(`dist/core/agent-session.js`),即仅会话级 `steer()` / `followUp()` / `prompt()` 走这条路(bg_task_join 的 "input" 唤醒与 settle 守卫依赖此路径)。
+- **子代理完成通知**的路径是:settle → onComplete → nudge(individual 200ms hold / 同批 ≥2 个 smart-join 时 group 30s debounce)→ `pi.sendMessage({deliverAs:"steer", triggerTurn:true})` → pi core `sendCustomMessage` 流式分支直接 `this.agent.steer(appMessage)` 进 **core 级 steeringQueue**——完全绕过 `_runInputHandlers`,不触发 `input` 事件。
+- 后果:通知滞留在 steeringQueue,直到 join 因自身任务事件(告警/终态/超时/abort)退出后的下一个 LLM 调用边界才投递;`timeout_ms=0` 的长 join 下滞留可达数小时。事件落在两次工具调用的间隙时同样丢失(join 再注册时 `inputPendingSince` 不会置位,因为该标志只由 input 事件设置)。
+- **嵌套孙级更弱**:pi-subagents 的 `isTopLevelAgent`(`parentAgentId === undefined && workflowId === undefined`)门控下,孙级(owned children)完成既不 emit 事件也不发通知,join 中的 worker 无任何被动信号。
+- **settle 守卫会加剧**:guard 只查 bg-task 存活数,提示文案是"调用 bg_task_join 等待",正好把"同时持有存活任务与在飞子代理"的会话推进滞留状态。
+
+实践影响边界:标准拓扑(主会话 spawn 后空闲等通知、worker 叶子节点只 join 自己的任务)不受影响——idle 分支走 `triggerTurn → _startRun`,通知照常开新轮。缺口仅在"同一会话同时持有存活 bg-task(在 join)和在飞的后台子代理"时触发。
+
+#### 5.5.2 修复:bg-task 监听 subagents:completed/failed(2026-10-24,零 pi-subagents 补丁)
+
+`extensions/bg-task/index.ts` 新增 `pi.events.on("subagents:completed"/"subagents:failed")` 监听:置 `subagentSettledPending` 标志(与 `inputPendingSince` 同构,堵间隙竞态),有 activeJoin 则以 reason `"subagent"` 立即唤醒;join 注册时消费标志立即返回;`turn_start` 清除标志。join 返回文本提示通知将在下一模型调用前送达(steeringQueue 在工具批结束后、下一 LLM 调用前排水,唤醒 join 恰好就是放行排水的正确动作)。
+
+**作用域无需归属过滤(关键发现)**:`pi.events` 不是进程级总线,而是**每会话独立**——`pi.events` 绑定到 loader 的 eventBus(`extensions/loader.js` 的 api.events),`DefaultResourceLoader` 每实例 `createEventBus()`(resource-loader.js),且 pi-subagents 为子会话新建 loader 时不传 bus(src/agent-runner.ts)。因此本 runner 收到的 subagents:* 事件恰好就是将要投递到本会话的顶层子代理;子会话的 bg-task 实例听不到 root 的子代理完成,无假唤醒。注意 `Symbol.for("pi-subagents:manager")` 全局槽是 first-wins(只指向 root 的 manager),不能用于逐会话归属判断——本修复不依赖它。
+
+**已知盲区(未修)**:嵌套孙级完成不 emit 任何事件(§5.5.1),join 无法被动感知;worker 若需感知孙级,要么 join 带 timeout 轮换后主动 `get_subagent_result`,要么等自身任务事件。彻底修复需 pi-subagents 对 owned children 也 emit 会话级事件或发通知(上游改动),暂不做。
+
+验证:`extensions/bg-task/tests/subagent-wake.test.mjs` 5 用例(completed/failed 唤醒、间隙 pending 消费、turn_start 清除、input 原语义回归),`node --test` 全绿。
+
 ## 6. API 缺口核实结果(2026-09-30)
 
 1. **注入/唤起 API 已确认**:`pi.sendMessage({customType, content, display, details}, {triggerTurn: true, deliverAs})`(extensions/types.d.ts:1208-1211)→ `AgentSession.sendCustomMessage`,idle+triggerTurn 即"开新轮"。join 主方案下仅兑底路由需要它;settle 守卫用 `agent_before_settle` + BoundaryResult(entries+continue)。
@@ -168,8 +192,8 @@ bg-task 模型取消阻塞后,子代理 `task_start` 完就会返回,pi-subagent
 
 - alert 消息只携带短结论 + paths,大材料永远落文件;探针原始输出只留在沙箱内、被监视进程日志永不进入模型上下文(注入边界,结构性保证而非纪律约束)。
 - 分层(推荐):js 任务脚本以调度/编排为主;复杂检查逻辑在 write 生成的 bash check 脚本中,可独立手工执行。
-- join 静置期间零 provider request;输入入队(steer/followUp)即退 join。
-- join 期间 /agents 显示 running;完成通知仅在子代理真正收尾后发出。
+- join 静置期间零 provider request;输入入队(steer/followUp)即退 join;本会话名下顶层子代理完成(subagents:completed/failed)同样即退 join(§5.5)。
+- join 期间 /agents 显示 running;完成通知仅在子代理真正收尾后发出,且 join 中的会话能被该通知唤醒(§5.5)。
 - settle 守卫 veto ≤3 次,拒绝后任务重挂主会话路由兜底。
 - 30min abort 已由全局配置 `subagentHangEscalationMinutes: 0` 解除(§7-4);join 静默无时长上限,5min 节流 hang 警告噪音为已接受代价(仅 ui.notify/ledger,不影响执行)。
 - 任务沙箱崩溃/超内存不影响扩展与其它任务(每任务独立沙箱)。

@@ -109,6 +109,10 @@ export default function bgTaskExtension(pi: ExtensionAPI) {
     // 本 turn 内已有输入入队的时刻(joint 注册时消费;turn_start 清除)——
     // 修复 steer 在 join 注册前间隙到达导致唤醒信号丢失的竞态
     let inputPendingSince: number | undefined;
+    // 本 turn 内已有本会话名下的顶层后台子代理 settle(subagents:completed/failed)——
+    // 与 inputPendingSince 同构:事件可能落在 join 注册前的间隙(此时无 join 可唤),
+    // 标志由 join 注册时消费,turn_start 清除
+    let subagentSettledPending = false;
 
     function ensureSession(ctx: ExtensionContext): Map<string, TaskRecord> {
         const sid = ctx.sessionManager.getSessionId();
@@ -185,6 +189,33 @@ export default function bgTaskExtension(pi: ExtensionAPI) {
             { triggerTurn: true, deliverAs: "followUp" },
         );
     }
+
+    // -----------------------------------------------------------------------
+    // 事件:子代理完成唤醒 join
+    //
+    // 兼容性缺口(2026-10-24 实证,详见 DESIGN.md §5.5):pi-subagents 的完成通知走
+    // pi.sendMessage({deliverAs:"steer"}) → sendCustomMessage 流式分支,直接
+    // agent.steer() 进 core 级 steeringQueue——不触发扩展 input 事件(input 只在
+    // AgentSession._queueUserInput 即会话级 steer/followUp/prompt 路径上发出)。
+    // 阻塞在 join 里的会话因此感知不到完成通知,通知会滞留到 join 因自身任务事件
+    // 退出才投递(timeout_ms=0 的长 join 下可达数小时)。补救:监听 pi.events 的
+    // subagents:completed/failed 唤醒 join。作用域无需归属过滤:pi.events 是每
+    // 会话独立总线(ResourceLoader 每实例 createEventBus;子会话由 pi-subagents
+    // 新建 loader 时不传 bus),本 runner 收到的事件恰好就是将要投递到本会话的
+    // 顶层子代理。已知盲区:嵌套孙级(owned children)完成不 emit 任何事件
+    // (isTopLevelAgent 门控),join 无法被动感知,只能靠自身任务事件或
+    // get_subagent_result 主动查询。
+    // -----------------------------------------------------------------------
+    function wakeOnSubagentSettled(): void {
+        subagentSettledPending = true;
+        if (activeJoin) {
+            const j = activeJoin;
+            activeJoin = undefined;
+            j.resolve("subagent");
+        }
+    }
+    pi.events.on("subagents:completed", wakeOnSubagentSettled);
+    pi.events.on("subagents:failed", wakeOnSubagentSettled);
 
     function drainAlerts(record: TaskRecord, minSev: Sev): AlertItem[] {
         const keep: AlertItem[] = [];
@@ -397,7 +428,8 @@ export default function bgTaskExtension(pi: ExtensionAPI) {
         namespace,
         description:
             "事件驱动阻塞等待本会话的后台任务(静默期零 provider request)。返回条件:任一监控任务产生 ≥min_sev 告警 / 任一监控任务到达终态 / " +
-            "本会话有新输入入队(steer/followUp,立即让路)/ timeout_ms 到期(0=不限,默认 0)。返回携带送达的告警与任务状态摘要。" +
+            "本会话有新输入入队(steer/followUp,立即让路) / 本会话名下后台子代理完成(subagent,通知在下一模型调用前送达) / " +
+            "timeout_ms 到期(0=不限,默认 0)。返回携带送达的告警与任务状态摘要。" +
             "名下有存活任务时应以 join 等待,而不是结束回合。",
         parameters: Type.Object({
             timeout_ms: Type.Optional(Type.Number({ description: "最长阻塞毫秒数;0 = 不限(默认)" })),
@@ -430,6 +462,15 @@ export default function bgTaskExtension(pi: ExtensionAPI) {
                 return {
                     content: [{ type: "text", text: formatJoinResult("input", [], tasks) }],
                     details: { reason: "input", alerts: [] },
+                };
+            }
+            // 同理消费子代理完成标志:完成事件可能在 join 注册前的间隙到达,而通知
+            // 本身滞留在 steeringQueue(见 wakeOnSubagentSettled 注释),立即让路排水
+            if (subagentSettledPending) {
+                subagentSettledPending = false;
+                return {
+                    content: [{ type: "text", text: formatJoinResult("subagent", [], tasks) }],
+                    details: { reason: "subagent", alerts: [] },
                 };
             }
             const wakeReason = await new Promise<string>((resolve) => {
@@ -465,6 +506,9 @@ export default function bgTaskExtension(pi: ExtensionAPI) {
 
     function formatJoinResult(reason: string, alerts: AlertItem[], tasks: Map<string, TaskRecord>): string {
         const lines = [`join woke: ${reason}`];
+        if (reason === "subagent") {
+            lines.push("a background subagent of this session settled; its completion notification is queued and arrives at the next model call — handle it before rejoining.");
+        }
         if (alerts.length) {
             lines.push(`alerts (${alerts.length}):`);
             for (const a of alerts) {
@@ -472,7 +516,7 @@ export default function bgTaskExtension(pi: ExtensionAPI) {
                 if (a.paths?.length) lines.push(`    paths: ${a.paths.join(", ")}`);
             }
         } else {
-            lines.push("no alerts (pending below min_sev or reason was input/timeout/terminal)");
+            lines.push("no alerts (pending below min_sev or reason was input/subagent/timeout/terminal)");
         }
         lines.push("tasks:");
         for (const t of tasks.values()) {
@@ -499,6 +543,7 @@ export default function bgTaskExtension(pi: ExtensionAPI) {
 
     pi.on("turn_start", () => {
         inputPendingSince = undefined;
+        subagentSettledPending = false;
     });
 
     pi.on("tool_execution_end", () => {
