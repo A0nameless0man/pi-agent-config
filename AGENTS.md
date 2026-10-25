@@ -191,7 +191,7 @@ graph TD
 GitHub 账号 `A0nameless0man` 下维护第三方 pi 扩展的私有 fork，用于在上游破损或缺失修复时承载本地补丁。约定：fork 的 `main` = 上游镜像（只 fast-forward）；补丁一律走 `fix/<topic>` 分支，上游吸收或自行解决后删除分支。settings.json 的 packages 经模板（settings.json.example）同步，各机需跟进模板变更（settings 本体不入库，易漂移）。当前存在的 fork：
 
 -   `A0nameless0man/pi-goal-list-loop-audit`（glla）。历史补丁（Windows .cmd spawn、abort 续跑）均已被上游吸收，当前零补丁；settings 指向 fork `main`（镜像，滞后由人控制）。上游再出致命 bug 时：修复落 fork 分支，settings 改为 `git:github.com/A0nameless0man/pi-goal-list-loop-audit@<branch>`（`@` 后缀 pin 分支，防 pi 自动 reset 回坏 main）
--   `A0nameless0man/pi-sessions`（上游 thurstonsand/pi-sessions）。`main` 携带 3 个本地补丁（① session-auto-title：对话文本提取/acp-history，避开循环压缩状态；② fix(index)：stale ctx 崩溃修复，shared/ctx-safety.ts + recovery.ts notifySafe 边界 + session-hooks 提前捕获 sessionFile，上游 v0.20.0 未修），镜像同步时先 rebase 补丁再推
+-   `A0nameless0man/pi-sessions`（上游 thurstonsand/pi-sessions）。`main` 携带 2 个 auto-title 补丁（2026-10-24 rebase 到上游 0.20.2+：① 标题输入文本化+遵循 ACP 压缩状态+失败请求落盘；② 默认标题 prompt 要求使用对话语言）。原第 3 个补丁（stale ctx 崩溃修复）已被上游 0.20.1 `4a96672` 以更完整方案修复，rebase 时弃用。镜像同步时先 rebase 补丁再推
 
 ---
 

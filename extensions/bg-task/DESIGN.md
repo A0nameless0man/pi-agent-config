@@ -170,6 +170,8 @@ bg-task 模型取消阻塞后,子代理 `task_start` 完就会返回,pi-subagent
 
 验证:`extensions/bg-task/tests/subagent-wake.test.mjs` 5 用例(completed/failed 唤醒、间隙 pending 消费、turn_start 清除、input 原语义回归),`node --test` 全绿。
 
+**pi-subagents 0.22.0 适配性确认(2026-10-24)**:0.22.0 重排了完成通知的批处理语义(smart 模式不再 30s 攒批、单个完成 ~200ms 即投、Esc 后 pending 完成会开新轮),但投递机制不变——仍经 `pi.sendMessage({deliverAs:"steer", triggerTurn:true})` → sendCustomMessage 流式分支 → core steeringQueue,不触发扩展 input 事件。本节缺口与修复在 0.22.0 下依然成立,无需改动。本节所述 "30s group debounce" 仅适用于 `group` join 模式的批次。
+
 ## 6. API 缺口核实结果(2026-09-30)
 
 1. **注入/唤起 API 已确认**:`pi.sendMessage({customType, content, display, details}, {triggerTurn: true, deliverAs})`(extensions/types.d.ts:1208-1211)→ `AgentSession.sendCustomMessage`,idle+triggerTurn 即"开新轮"。join 主方案下仅兑底路由需要它;settle 守卫用 `agent_before_settle` + BoundaryResult(entries+continue)。
