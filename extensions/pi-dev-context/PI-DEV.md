@@ -38,8 +38,13 @@ Windows（改模板/加 skill/插件源码）
 - packages 新增（如 `npm:pi-sessions`）要写进 `settings.json.example` 的 packages 数组，
   各机 pull + refresh 后 pi 启动时自动安装（或手动 `pi install npm:<pkg>`）
 - **`pi-sessions` 已改为自维护 fork**：`git:github.com/A0nameless0man/pi-sessions`（原 `npm:pi-sessions`）。
-  fork 上两个补丁 commit（2026-10-24 rebase 到上游 0.20.2+）：标题输入文本化+遵循 ACP 压缩状态+失败请求落盘、
-  默认标题 prompt 要求使用对话语言。原 stale ctx 补丁已被上游 0.20.1 `4a96672` 修复，已弃。上游发版后在该仓库
+  fork 上两个补丁 commit（2026-11-09 rebase 到上游 0.23.0）：标题输入文本化+遵循 ACP 压缩状态+失败请求落盘、
+  默认标题 prompt 要求使用对话语言。原 stale ctx 补丁已被上游 0.20.1 `4a96672` 修复，已弃。
+  另有本地补丁 `fix(session-messaging)`：broker client socket + 重连定时器 `unref()`——
+  `-p/--no-session` 无会话生命周期，onSessionShutdown 的 disconnect() 永不触发，
+  ref'd pipe socket 会让 node 进程永不退出（Windows 实测 `pi -p` 打印回复后挂死）。
+  排障期临时 pin 分支 `pin/cc57199` = 上游 0.20.2+ 旧稳定点，settings 里
+  `git:github.com/A0nameless0man/pi-sessions@pin/cc57199` 后缀可指定分支。上游发版后在该仓库
   `git fetch upstream && git rebase upstream/main && git push origin main`，各机 pull + refresh 即生效
   （pi 的 git 包跟踪 main，改完必须 push 才装得到；重装/更新用 `pi update git:github.com/A0nameless0man/pi-sessions`；
   force-push 后 `pi update --extensions` 不可靠，须手动进包目录 `git fetch origin && git reset --hard origin/main` 并逐台核对检出 SHA）
@@ -83,6 +88,13 @@ ssh <host> 'ZKEY=$(sed -n 1p /tmp/.pi-sync-keys); OVK=$(sed -n 2p /tmp/.pi-sync-
 - **auto-title 不 pin 模型**（去掉 `sessions.autoTitle.model`，用当前会话模型）：pin 一个
   端点挂掉/余额不足的模型时，解析期不失败而请求期失败，标题会静默停更。反过来，zhipu 机器上
   若当前会话模型是 glm-5.3\*，需临时 pin（zai 格式发 `thinking:{type:disabled}` 被该系拒为 1210）
+- **Windows：pi 1.5.0 原生 TS 加载 × Defender 实时扫描 → `pi -p` 启动分钟级**（2026-11-09 实测）：
+  pi 1.5.0 用 Node 原生同步 ESM 加载器（ModuleJob/syncLink）加载 TS 源码扩展（git 包及 npm 包
+  的 src/*.ts），TS 风格 `.js` import 触发全组合候选路径 stat 探测，单次启动 30 万+ 次 stat；
+  Defender 把单次 stat 放大到 ~1.2ms（裸机 ~0.05ms）→ `pi -p` 卡在模块加载、永远到不了模型请求，
+  无响应无报错。诊断：CDP `Debugger.pause` 栈全是模块加载帧；裸 node fetch 正常（网络无关）。
+  修复：管理员 PowerShell 给 Defender 加排除——`~/.pi/agent`、npm 全局 `@earendil-works`、
+  `%TEMP%\jiti` 三个目录。Linux 机器无此问题（stat 便宜、无 Defender），同配置冒烟 8-11s
 
 ### 提交规范
 
