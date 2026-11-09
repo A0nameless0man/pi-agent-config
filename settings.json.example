@@ -5,7 +5,7 @@
   "theme": "dark",
   "defaultThinkingLevel": "high",
   "packages": [
-    "npm:pi-effort",
+    "npm:@machine-made/pi-effort",
     "npm:@tintinweb/pi-subagents",
     "npm:@juicesharp/rpiv-ask-user-question",
     "npm:@juicesharp/rpiv-todo",
