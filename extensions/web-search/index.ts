@@ -20,6 +20,15 @@
  * - Rate limit is a generous account-level 100 QPS for Search — no client-side
  *   limiter needed (the old Bocha extension needed one at 10 req/min).
  *
+ * Fetch (https://api.deepseek.com/v1/tools/fetch, same Bearer key):
+ * - Request body `{ url }` — ≤8192 chars, http/https only, no userinfo.
+ * - Response `{ title, content }`; `title` is "" when unavailable, `content`
+ *   is the page as Markdown (extracted server-side).
+ * - Error semantics drive the playwright-cli fallback: 403 = blocked by
+ *   security policy (risk control / anti-crawl), 404 = no extractable content
+ *   (JS-rendered SPA, non-HTML content type, site policy). Both surface the
+ *   hint to fall back to the playwright-cli skill (real-browser fetch).
+ *
  * The response is parsed and rendered as markdown (titles, URLs, summaries)
  * so the model reads a compact, readable summary instead of raw JSON.
  * Provider-agnostic wording throughout (tool name, description, rendered
@@ -33,11 +42,19 @@ import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
 const DEEPSEEK_API_BASE = "https://api.deepseek.com/v1/tools/search";
+const DEEPSEEK_FETCH_API_BASE = "https://api.deepseek.com/v1/tools/fetch";
 const REQUEST_TIMEOUT_MS = 30_000;
+// Pages can be slower to extract than search results; the official examples
+// use a 60s client timeout.
+const FETCH_TIMEOUT_MS = 60_000;
+// Global cap on the rendered markdown handed to the model. A single long page
+// can otherwise balloon to hundreds of K chars.
+const MAX_FETCH_CHARS = 30_000;
 
-// DeepSeek hard limit per official docs (fail fast with an actionable message
+// DeepSeek hard limits per official docs (fail fast with an actionable message
 // instead of a round trip that 400s).
 const QUERY_MAX = 128;
+const FETCH_URL_MAX = 8192;
 
 // Params natively understood by the DeepSeek API. Anything else the model
 // sends (e.g. Bocha-habit freshness/include/exclude/summary) is NOT forwarded
@@ -89,6 +106,19 @@ interface SearchParams {
 	need_content?: boolean;
 }
 
+const WebFetchParams = Type.Object({
+	url: Type.String({
+		description:
+			`URL to fetch (http/https, max ${FETCH_URL_MAX} chars). Returns the page title and its body as Markdown. ` +
+			"For JS-rendered SPA pages or anti-crawl sites that fail here (HTTP 403/404 or empty body), " +
+			"fall back to the playwright-cli skill instead.",
+	}),
+});
+
+interface FetchParams {
+	url: string;
+}
+
 /** API key resolution: explicit env var wins; fall back to pi's own
  * credential store via the official one-off reader — the Search API shares
  * the Bearer key already configured for DeepSeek chat models, so every
@@ -123,6 +153,20 @@ function statusHint(status: number): string | null {
 	if (status === 401) return "API key is missing or invalid.";
 	if (status === 402) return "Account balance insufficient — top up at platform.deepseek.com.";
 	if (status === 429) return "Rate limited (account-level QPS). Wait a moment and retry.";
+	if (status === 408 || status >= 500) return "Transient upstream error — safe to retry.";
+	return null;
+}
+
+/** Fetch-specific hints. 403/404 carry the playwright-cli fallback guidance
+ * (the 2026-09 decision: a failed/empty fetch steers toward real-browser
+ * fetching instead of dead-ending). */
+function fetchStatusHint(status: number): string | null {
+	if (status === 401) return "API key is missing or invalid.";
+	if (status === 402) return "Account balance insufficient — top up at platform.deepseek.com.";
+	if (status === 403)
+		return "blocked by security policy (provider risk control or target-site anti-crawl). This page usually needs a real browser: fall back to the playwright-cli skill.";
+	if (status === 404)
+		return "no extractable page content (URL unavailable, site policy, non-HTML content type, or no Markdown body — JS-rendered SPA pages often land here). Fall back to the playwright-cli skill (goto + snapshot).";
 	if (status === 408 || status >= 500) return "Transient upstream error — safe to retry.";
 	return null;
 }
@@ -211,6 +255,117 @@ async function executeSearch(params: SearchParams, signal: AbortSignal | undefin
 		let message = `Web search failed: ${reason}`;
 		if (timedOut) message = `Web search request timed out after ${REQUEST_TIMEOUT_MS / 1000}s.`;
 		else if (signal?.aborted) message = "Web search aborted.";
+		return { content: [{ type: "text", text: message }], isError: true };
+	} finally {
+		clearTimeout(timer);
+		signal?.removeEventListener("abort", onExternalAbort);
+	}
+}
+
+async function executeFetch(params: FetchParams, signal: AbortSignal | undefined): Promise<AgentToolResult> {
+	const apiKey = resolveApiKey();
+	if (!apiKey) {
+		return {
+			content: [
+				{
+					type: "text",
+					text: "Error: no DeepSeek API key found. Set the DEEPSEEK_API_KEY environment variable, or configure the 'deepseek' provider in ~/.pi/agent/auth.json, then restart pi.",
+				},
+			],
+			isError: true,
+		};
+	}
+
+	const url = params.url.trim();
+	if (!url) {
+		return { content: [{ type: "text", text: "Error: url is required and must not be empty." }], isError: true };
+	}
+	// Client-side guards mirroring the API contract: actionable local errors
+	// beat a round trip that 400s. file:// (local docs/EPUB reading) is not
+	// supported by the API — point straight at the playwright fallback.
+	if (!/^https?:\/\//i.test(url)) {
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Error: url must be http/https (got "${url.slice(0, 60)}"). For file:// or other schemes, use the playwright-cli skill instead.`,
+				},
+			],
+			isError: true,
+		};
+	}
+	if (url.length > FETCH_URL_MAX) {
+		return {
+			content: [{ type: "text", text: `Error: url exceeds the ${FETCH_URL_MAX}-char limit (got ${url.length}).` }],
+			isError: true,
+		};
+	}
+
+	const controller = new AbortController();
+	let timedOut = false;
+	const timer = setTimeout(() => {
+		timedOut = true;
+		controller.abort();
+	}, FETCH_TIMEOUT_MS);
+	const onExternalAbort = () => controller.abort();
+	signal?.addEventListener("abort", onExternalAbort, { once: true });
+
+	try {
+		const res = await fetch(DEEPSEEK_FETCH_API_BASE, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+				Authorization: `Bearer ${apiKey}`,
+			},
+			body: JSON.stringify({ url }),
+			signal: controller.signal,
+		});
+
+		const text = await res.text();
+
+		if (res.status < 200 || res.status >= 300) {
+			const detail = extractApiError(text) ?? text.slice(0, 500);
+			const hint = fetchStatusHint(res.status);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Web fetch failed: HTTP ${res.status}${detail ? `: ${detail}` : ""}${hint ? ` (${hint})` : ""}`,
+					},
+				],
+				isError: true,
+			};
+		}
+
+		// Official 200 body is `{ title, content }`; render defensively so a
+		// shape drift surfaces as raw body instead of "undefined" lines.
+		let title = "";
+		let content = "";
+		try {
+			const parsed = JSON.parse(text) as Record<string, unknown>;
+			title = str(parsed.title);
+			content = str(parsed.content);
+		} catch {
+			return { content: [{ type: "text", text }], isError: false };
+		}
+
+		const lines: string[] = [`## 网页抓取${title ? ` · ${title}` : ""}`, "", `URL: ${url}`, ""];
+		if (!content.trim()) {
+			lines.push("_(正文为空)_", "", "> 建议改用 playwright-cli skill(goto + snapshot),以真实浏览器获取内容。");
+		} else {
+			lines.push(content);
+		}
+		let out = lines.join("\n");
+		if (out.length > MAX_FETCH_CHARS) {
+			const dropped = out.length - MAX_FETCH_CHARS;
+			out = out.slice(0, MAX_FETCH_CHARS) + `\n\n[内容超长已截断,丢弃约 ${dropped} 字符]`;
+		}
+		return { content: [{ type: "text", text: out }], isError: false };
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		let message = `Web fetch failed: ${reason}`;
+		if (timedOut) message = `Web fetch timed out after ${FETCH_TIMEOUT_MS / 1000}s.`;
+		else if (signal?.aborted) message = "Web fetch aborted.";
 		return { content: [{ type: "text", text: message }], isError: true };
 	} finally {
 		clearTimeout(timer);
@@ -465,6 +620,52 @@ export default function (pi: ExtensionAPI) {
 			const state = ((context.state ??= {}) as RenderState);
 			// While a partial result streams, refresh once per second so the
 			// "Elapsed" footer ticks like bash does.
+			if (state.startedAt !== undefined && options.isPartial && !state.interval) {
+				state.interval = setInterval(() => context.invalidate(), ELAPSED_UPDATE_MS);
+			}
+			if (!options.isPartial || context.isError) {
+				state.endedAt ??= Date.now();
+				if (state.interval) {
+					clearInterval(state.interval);
+					state.interval = undefined;
+				}
+			}
+			const component =
+				(context.lastComponent as SearchResultRenderComponent | undefined) ?? new SearchResultRenderComponent();
+			rebuildResultComponent(component, result, options, theme, state);
+			component.invalidate();
+			return component;
+		},
+	});
+
+	// Same collapsed-preview TUI as web_search (SearchResultRenderComponent /
+	// rebuildResultComponent are tool-agnostic); only the call header differs.
+	pi.registerTool({
+		name: "web_fetch",
+		label: "Web Fetch",
+		description:
+			"Fetch a single web page and return its title and Markdown body, extracted server-side. " +
+			"Use it to read a specific URL (e.g. one found via web_search) without opening a browser. " +
+			"If it fails (HTTP 403/404 — JS-rendered SPA, anti-crawl wall, non-HTML content) or returns an empty body, " +
+			"fall back to the playwright-cli skill: a real browser (goto + snapshot) gets content this tool cannot.",
+		parameters: WebFetchParams,
+		async execute(_toolCallId, params, signal) {
+			return executeFetch(params as FetchParams, signal);
+		},
+		renderCall(args, theme, context) {
+			const state = ((context.state ??= {}) as RenderState);
+			if (context.executionStarted && state.startedAt === undefined) {
+				state.startedAt = Date.now();
+				state.endedAt = undefined;
+			}
+			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
+			const head = theme.fg("toolTitle", theme.bold("⇣ fetch"));
+			const url = typeof args?.url === "string" ? args.url : "";
+			text.setText(head + (url ? ` ${theme.fg("toolOutput", url)}` : ""));
+			return text;
+		},
+		renderResult(result, options, theme, context) {
+			const state = ((context.state ??= {}) as RenderState);
 			if (state.startedAt !== undefined && options.isPartial && !state.interval) {
 				state.interval = setInterval(() => context.invalidate(), ELAPSED_UPDATE_MS);
 			}

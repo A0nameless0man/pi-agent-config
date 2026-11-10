@@ -1,6 +1,6 @@
 ---
 name: playwright-cli
-description: Automate browser interactions, test web pages and work with Playwright tests.
+description: Automate browser interactions, test web pages and work with Playwright tests. Also serves as the advanced web fetch for JS-rendered SPA pages, anti-crawl walls, login-gated content, and any URL where web_fetch fails (HTTP 403/404, empty body) — a real browser (open + snapshot) extracts content static fetch cannot.
 ---
 
 # Browser Automation with playwright-cli
@@ -21,6 +21,24 @@ playwright-cli screenshot
 # close the browser
 playwright-cli close
 ```
+
+## Reading pages web_fetch cannot get (advanced fetch)
+
+Beyond testing and automation, use playwright-cli as the fallback fetch when `web_fetch` fails
+(HTTP 403/404, empty body) or the target is JS-rendered SPA content, behind an anti-crawl wall,
+or login-gated — cases where server-side fetch gets no usable Markdown:
+
+```bash
+playwright-cli open "https://example.com/spa-page"
+# if the snapshot looks empty, let client-side rendering settle first
+playwright-cli run-code "async page => { await page.waitForLoadState('networkidle'); }"
+playwright-cli snapshot                                # accessibility tree — the default way to read
+playwright-cli eval "document.body.innerText.slice(0, 8000)"   # bulk plain-text extraction
+playwright-cli close
+```
+
+Prefer `snapshot` for structure and `eval "…innerText"` for bulk text; `screenshot` only when the
+visual layout itself matters.
 
 ## Commands
 
