@@ -89,44 +89,8 @@
       "api": "openai-completions",
       "models": [
         {
-          "id": "glm-4.7",
-          "name": "GLM 4.7 (按量)",
-          "reasoning": true,
-          "input": [
-            "text"
-          ],
-          "contextWindow": 200000,
-          "maxTokens": 65536,
-          "compat": {
-            "supportsStore": false,
-            "supportsDeveloperRole": false,
-            "supportsReasoningEffort": false,
-            "maxTokensField": "max_tokens",
-            "thinkingFormat": "zai",
-            "zaiToolStream": true
-          },
-          "cost": {
-            "input": 0.429,
-            "output": 2,
-            "cacheRead": 0.086,
-            "cacheWrite": 0.429,
-            "tiers": [
-              {
-                "input": 0.571,
-                "output": 2.286,
-                "cacheRead": 0.114,
-                "cacheWrite": 0.571,
-                "inputTokensAbove": 32768
-              }
-            ]
-          },
-          "promptCache": {
-            "short": 600
-          }
-        },
-        {
-          "id": "glm-5.3",
-          "name": "GLM 5.3",
+          "id": "glm-5.4",
+          "name": "GLM 5.4",
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
@@ -136,7 +100,8 @@
             "max": "max"
           },
           "input": [
-            "text"
+            "text",
+            "image"
           ],
           "contextWindow": 1000000,
           "maxTokens": 65536,
@@ -199,76 +164,6 @@
       "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
       "api": "openai-completions",
       "models": [
-        {
-          "id": "glm-4.7",
-          "name": "GLM 4.7 (个人 coding)",
-          "reasoning": true,
-          "input": [
-            "text"
-          ],
-          "contextWindow": 200000,
-          "maxTokens": 65536,
-          "compat": {
-            "supportsStore": false,
-            "supportsDeveloperRole": false,
-            "supportsReasoningEffort": false,
-            "maxTokensField": "max_tokens",
-            "thinkingFormat": "zai",
-            "zaiToolStream": true
-          },
-          "cost": {
-            "input": 0.429,
-            "output": 2,
-            "cacheRead": 0.086,
-            "cacheWrite": 0.429,
-            "tiers": [
-              {
-                "input": 0.571,
-                "output": 2.286,
-                "cacheRead": 0.114,
-                "cacheWrite": 0.571,
-                "inputTokensAbove": 32768
-              }
-            ]
-          },
-          "promptCache": {
-            "short": 600
-          }
-        },
-        {
-          "id": "glm-5.3",
-          "name": "GLM 5.3",
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "minimal": null,
-            "low": "low",
-            "medium": "high",
-            "high": "high",
-            "max": "max"
-          },
-          "input": [
-            "text"
-          ],
-          "contextWindow": 1000000,
-          "maxTokens": 65536,
-          "compat": {
-            "supportsStore": false,
-            "supportsDeveloperRole": false,
-            "supportsReasoningEffort": true,
-            "maxTokensField": "max_tokens",
-            "thinkingFormat": "zai",
-            "zaiToolStream": true
-          },
-          "cost": {
-            "input": 1.143,
-            "output": 4,
-            "cacheRead": 0.286,
-            "cacheWrite": 1.143
-          },
-          "promptCache": {
-            "short": 600
-          }
-        },
         {
           "id": "glm-5.4",
           "name": "GLM 5.4",
@@ -345,76 +240,6 @@
       "baseUrl": "https://open.bigmodel.cn/api/coding/paas/v4",
       "api": "openai-completions",
       "models": [
-        {
-          "id": "glm-4.7",
-          "name": "GLM 4.7 (公司 coding)",
-          "reasoning": true,
-          "input": [
-            "text"
-          ],
-          "contextWindow": 200000,
-          "maxTokens": 65536,
-          "compat": {
-            "supportsStore": false,
-            "supportsDeveloperRole": false,
-            "supportsReasoningEffort": false,
-            "maxTokensField": "max_tokens",
-            "thinkingFormat": "zai",
-            "zaiToolStream": true
-          },
-          "cost": {
-            "input": 0.429,
-            "output": 2,
-            "cacheRead": 0.086,
-            "cacheWrite": 0.429,
-            "tiers": [
-              {
-                "input": 0.571,
-                "output": 2.286,
-                "cacheRead": 0.114,
-                "cacheWrite": 0.571,
-                "inputTokensAbove": 32768
-              }
-            ]
-          },
-          "promptCache": {
-            "short": 600
-          }
-        },
-        {
-          "id": "glm-5.3",
-          "name": "GLM 5.3",
-          "reasoning": true,
-          "thinkingLevelMap": {
-            "minimal": null,
-            "low": "low",
-            "medium": "high",
-            "high": "high",
-            "max": "max"
-          },
-          "input": [
-            "text"
-          ],
-          "contextWindow": 1000000,
-          "maxTokens": 65536,
-          "compat": {
-            "supportsStore": false,
-            "supportsDeveloperRole": false,
-            "supportsReasoningEffort": true,
-            "maxTokensField": "max_tokens",
-            "thinkingFormat": "zai",
-            "zaiToolStream": true
-          },
-          "cost": {
-            "input": 1.143,
-            "output": 4,
-            "cacheRead": 0.286,
-            "cacheWrite": 1.143
-          },
-          "promptCache": {
-            "short": 600
-          }
-        },
         {
           "id": "glm-5.4",
           "name": "GLM 5.4",

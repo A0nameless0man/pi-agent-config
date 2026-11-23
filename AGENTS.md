@@ -69,17 +69,17 @@ pi 核心工具仅包含 read / write / edit / bash,**没有 `task` 工具**。�
 -   **`Agent`** — 启动子Agent,核心参数:`subagent_type`、`prompt`、`description`、`model`、`thinking`、`run_in_background`、`isolated`、`isolation: "worktree"`、`inherit_context`
 -   **`get_subagent_result`** — 查询后台子Agent状态/结果(`wait` / `verbose`)
 -   **`steer_subagent`** — 向运行中的子Agent注入转向消息,无需重启
--   **角色定义**:`~/.pi/agent/agents/*.md`(全局)/ `.pi/agents/*.md`(项目)/ `.agents/agents/*.md`,预置角色包括 `planner`(计划)、`reviewer`(审查)、`scout`(侦察)、`worker`(执行)、`visual`(视觉分析)、`visual-worker`(worker+visual,执行中主动用视觉,均多模态模型专属)、`Designer`(只读设计审查,产架构/受影响文件/风险/验证方案),另内置 `general-purpose` / `Explore` / `Plan`
+-   **角色定义**:`~/.pi/agent/agents/*.md`(全局)/ `.pi/agents/*.md`(项目)/ `.agents/agents/*.md`,预置角色包括 `planner`(计划)、`reviewer`(审查)与四档 `worker`(执行,见下方角色模型分工),另内置 `general-purpose` / `Explore` / `Plan`;`Designer` 由 glla 按需生成,不在本仓库模板体系内
 -   **并发**:后台子Agent默认 10 并发,现配 6,超出自动排队;`/agents` → Settings 可调整
 -   **超长无进展 tool call 自动终止（重要陷阱，机制已实证 2026-09-30）**:终止者不是 pi-subagents/pi core（两者均无工具调用时长超时，已全量枚举源码确证），而是**本机 GLA heartbeat 的 subagent hang 升级**：子代理无进展（判据仅 toolUses 与输出 token，工具结束才计数）达 30min（默认；GLA settings 键 `subagentHangEscalationMinutes`，0=禁用，1-4 回落 30）时经 `subagents:rpc:stop` abort，报错 "This operation was aborted"，状态误标 "STOPPED BY THE USER"（与用户无关、与 OOM 无关；实测四要素全中，详见 extensions/bg-task/DESIGN.md §9）。长时监视**已改用 bg-task 扩展**（watchdog skill 的 bg_task_start + bg_task_join 事件驱动阻塞,2026-09-30 落地）,不再需要短轮询规避;escalation 已全局设 0（`subagentHangEscalationMinutes`）。历史短轮询模式（watchdog.sh,已退役）仅存于 git 历史
 -   **上下文传递**:`Agent` 的 prompt 即任务交接文档,必须包含下方 目标 / 工作环境 / 约束条件 / 参考信息 四要素
 -   **管理命令**:`/agents` 交互菜单(查看运行中 agent、创建/编辑自定义 agent、调整并发/嵌套深度等)
 
 **角色模型分工**(由 `model-profiles.json` 定义,`bash ~/.pi/agent/switch-model.sh <profile>` 切换,当前会话立刻换用 `/model`):
--   `scout` — profile 快速档(flash)+ low thinking
--   `visual` — 多模态快速视觉分析(读图/截图对比),视觉模型 + low thinking;`visual-worker` — worker+visual 复合角色(边执行边用视觉:截图核对迭代、设计还原验证),视觉模型 + max thinking
--   `planner` / `reviewer` / `worker` — profile 主力档(pro),thinking medium / high / high;`Designer` — 主力档(pro)+ medium(只读设计角色,与 planner 同档)
--   视觉模型分配:zhipu 系 profile 用 glm-5.3-flash,deepseek profile 用 deepseek-flash(2026-09 起 V4.1 Flash 原生多模态,文本/视觉统一同一个 flash 模型)
+-   `worker` 四档高低搭配,按任务难度选档(后缀标出相对上一档降了什么;各档工具权限相同,只差 model + thinking):`worker`(最重档,旗舰 + max)→ `worker-high`(旗舰 + high)→ `worker-flash`(快速档 + high)→ `worker-flash-low`(快速档 + low,最轻;兼做代码侦察与一次性读图)
+-   `planner` / `reviewer` — 旗舰模型 + high thinking
+-   智谱系三个 profile(coding-personal / coding-company / 按量 zhipu)只用两个模型:旗舰 = glm-5.4(多模态),快速档 = glm-5.3-flash(多模态);deepseek profile 只有 `deepseek-flash` 一个模型(多模态),`worker-high` 与 `worker-flash` 落在同一档
+-   订阅分配(用户指定):Windows 本机用 `zhipu-coding-personal`(个人订阅),其余机器一律 `zhipu-coding-company`(公司订阅)
 -   `Explore` — 由 glla 管理、继承父模型,不在 profile 里
 -   profile 派生与多机同步机制(.example 模板、install.sh、key 中转)详见 extensions/pi-dev-context/PI-DEV.md(仅在本目录工作时自动注入)
 
@@ -87,8 +87,8 @@ pi 核心工具仅包含 read / write / edit / bash,**没有 `task` 工具**。�
 -   **触发场景**:UI/页面设计与还原(设计稿 vs 渲染截图对比、布局错位诊断、视觉回归)、2D/3D 空间数学(几何示意图判读、坐标系变换图解、轨迹/点云/地图可视化、仿真场景截图核对)、图表与数据可视化(chart 与数据一致性核对、坐标轴/图例审校、大屏效果检查)、架构/流程/时序图理解与渲染验证、文档影像(PDF/扫描件/表格截图/白板照片提取)、过程验证(浏览器截图验收、图形渲染迭代、报错弹窗/接线图/设备面板判读)
 -   **规则**:
     -   存在图像输入、或产出需要"看"来验证时,必须实际读图,**禁止凭文字描述或想象臆测图像内容**
-    -   一次性判读(看一眼/提取表面信息)→ `visual`(快速档);**边执行边用视觉的工作**(截图→核对→修改迭代、UI 调到与设计稿一致、可视化生成后自检)或看懂后需深度推理/对比判断 → `visual-worker`
-    -   主模型自身多模态时直接读图(vision-nudge 扩展会在系统提示词中提醒充分用眼);text-only 主模型遇到图像任务必须派 visual 系角色
+    -   在用模型(glm-5.4 / glm-5.3-flash / deepseek-flash)均多模态,视觉工作不再需要独立的 visual 系角色:**边执行边用视觉的工作**(截图→核对→修改迭代、UI 调到与设计稿一致、可视化生成后自检)按难度选 `worker` 档;一次性判读或需要隔离大图(避免占用主上下文)时派最轻档 `worker-flash-low`
+    -   主模型自身多模态时直接读图(vision-nudge 扩展会在系统提示词中提醒充分用眼);若当前模型 text-only(如切到 deepseek-v4-pro),改派多模态档位的 worker
 
 ## 任务交接示例
 

@@ -4,55 +4,51 @@
     "model": "deepseek-flash",
     "thinking": "high",
     "agents": {
-      "scout": { "model": "deepseek/deepseek-flash", "thinking": "low" },
-      "visual": { "model": "deepseek/deepseek-flash", "thinking": "low" },
-      "visual-worker": { "model": "deepseek/deepseek-flash", "thinking": "max" },
-      "planner": { "model": "deepseek/deepseek-flash", "thinking": "medium" },
-      "reviewer": { "model": "deepseek/deepseek-flash", "thinking": "high" },
-      "worker": { "model": "deepseek/deepseek-flash", "thinking": "high" },
-      "Designer": { "model": "deepseek/deepseek-flash", "thinking": "medium" }
+      "worker": { "model": "deepseek/deepseek-flash", "thinking": "max" },
+      "worker-high": { "model": "deepseek/deepseek-flash", "thinking": "high" },
+      "worker-flash": { "model": "deepseek/deepseek-flash", "thinking": "high" },
+      "worker-flash-low": { "model": "deepseek/deepseek-flash", "thinking": "low" },
+      "planner": { "model": "deepseek/deepseek-flash", "thinking": "high" },
+      "reviewer": { "model": "deepseek/deepseek-flash", "thinking": "high" }
     }
   },
   "zhipu": {
     "provider": "zhipu",
-    "model": "glm-5.3",
+    "model": "glm-5.4",
     "thinking": "max",
     "agents": {
-      "scout": { "model": "zhipu/glm-5.3-flash", "thinking": "low" },
-      "visual": { "model": "zhipu/glm-5.3-flash", "thinking": "low" },
-      "visual-worker": { "model": "zhipu/glm-5.3-flash", "thinking": "max" },
-      "planner": { "model": "zhipu/glm-5.3", "thinking": "medium" },
-      "reviewer": { "model": "zhipu/glm-5.3", "thinking": "max" },
-      "worker": { "model": "zhipu/glm-5.3", "thinking": "max" },
-      "Designer": { "model": "zhipu/glm-5.3", "thinking": "medium" }
+      "worker": { "model": "zhipu/glm-5.4", "thinking": "max" },
+      "worker-high": { "model": "zhipu/glm-5.4", "thinking": "high" },
+      "worker-flash": { "model": "zhipu/glm-5.3-flash", "thinking": "high" },
+      "worker-flash-low": { "model": "zhipu/glm-5.3-flash", "thinking": "low" },
+      "planner": { "model": "zhipu/glm-5.4", "thinking": "high" },
+      "reviewer": { "model": "zhipu/glm-5.4", "thinking": "high" }
     }
   },
   "zhipu-coding-personal": {
     "provider": "zhipu-coding-personal",
-    "model": "glm-5.3",
+    "model": "glm-5.4",
     "thinking": "max",
     "agents": {
-      "scout": { "model": "zhipu-coding-personal/glm-5.3-flash", "thinking": "low" },
-      "visual": { "model": "zhipu-coding-personal/glm-5.3-flash", "thinking": "low" },
-      "visual-worker": { "model": "zhipu-coding-personal/glm-5.3-flash", "thinking": "max" },
-      "planner": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "medium" },
-      "reviewer": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "max" },
-      "worker": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "max" },
-      "Designer": { "model": "zhipu-coding-personal/glm-5.3", "thinking": "medium" }
+      "worker": { "model": "zhipu-coding-personal/glm-5.4", "thinking": "max" },
+      "worker-high": { "model": "zhipu-coding-personal/glm-5.4", "thinking": "high" },
+      "worker-flash": { "model": "zhipu-coding-personal/glm-5.3-flash", "thinking": "high" },
+      "worker-flash-low": { "model": "zhipu-coding-personal/glm-5.3-flash", "thinking": "low" },
+      "planner": { "model": "zhipu-coding-personal/glm-5.4", "thinking": "high" },
+      "reviewer": { "model": "zhipu-coding-personal/glm-5.4", "thinking": "high" }
     }
   },
   "zhipu-coding-company": {
     "provider": "zhipu-coding-company",
-    "model": "glm-5.3",
+    "model": "glm-5.4",
     "thinking": "max",
     "agents": {
-      "scout": { "model": "zhipu-coding-company/glm-5.3-flash", "thinking": "low" },
-      "visual": { "model": "zhipu-coding-company/glm-5.3-flash", "thinking": "low" },
-      "visual-worker": { "model": "zhipu-coding-company/glm-5.3-flash", "thinking": "max" },
-      "planner": { "model": "zhipu-coding-company/glm-5.3", "thinking": "medium" },
-      "reviewer": { "model": "zhipu-coding-company/glm-5.3", "thinking": "max" },
-      "worker": { "model": "zhipu-coding-company/glm-5.3", "thinking": "max" },
-      "Designer": { "model": "zhipu-coding-company/glm-5.3", "thinking": "medium" }
+      "worker": { "model": "zhipu-coding-company/glm-5.4", "thinking": "max" },
+      "worker-high": { "model": "zhipu-coding-company/glm-5.4", "thinking": "high" },
+      "worker-flash": { "model": "zhipu-coding-company/glm-5.3-flash", "thinking": "high" },
+      "worker-flash-low": { "model": "zhipu-coding-company/glm-5.3-flash", "thinking": "low" },
+      "planner": { "model": "zhipu-coding-company/glm-5.4", "thinking": "high" },
+      "reviewer": { "model": "zhipu-coding-company/glm-5.4", "thinking": "high" }
     }
   }
 }

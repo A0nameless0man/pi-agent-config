@@ -44,6 +44,8 @@ pi 原生加载以下位置的 AGENTS.md,本 skill 生成的文档会被自动�
 
 ### 立即并行派出 scout(subagent 扩展)
 
+本文中的 scout 指 `subagent_type: worker-flash-low`(最轻档 worker:快速模型 + low thinking,全工具);独立的 `scout` 角色已并入该档。侦察任务在 prompt 里写明只读。
+
 不要等待——派出的同时主会话继续工作。每个 scout 用 grep/find/read 做结构化探索,**基于实际文件证据而非按惯例猜测**;发现的任何偏离标准模式之处都要 REPORT。
 
 ```

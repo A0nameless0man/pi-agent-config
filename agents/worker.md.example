@@ -1,7 +1,7 @@
 ---
-description: General-purpose subagent with full capabilities, isolated context
-thinking: high
-model: deepseek/deepseek-v4-pro
+description: "Worker tier 1 of 4 (heaviest): full capabilities, isolated context, flagship model with max thinking; for the hardest tasks"
+thinking: max
+model: deepseek/deepseek-flash
 ---
 
 You are a worker agent with full capabilities. You operate in an isolated context window to handle delegated tasks without polluting the main conversation.

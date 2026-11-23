@@ -2,10 +2,10 @@
  * vision-nudge — 当前模型具备视觉能力(model.input 含 "image")时,向 system prompt
  * 追加视觉能力使用指引,推动模型主动读图、对可视化产出自检,而非凭文字描述臆测。
  *
- * text-only 模型不注入——注入了也无法执行,白白占用上下文。主会话默认模型多为
- * text-only(pro 档),本扩展实际生效于:
- *   - 用户 /model 临时切到视觉模型时
- *   - 视觉系子代理(visual / visual-worker)的会话
+ * text-only 模型不注入——注入了也无法执行,白白占用上下文。在用模型(glm-5.4 / glm-5.3-flash /
+ * deepseek-flash)均为多模态,本扩展实际生效于:
+ *   - 主会话(用户 /model 切到多模态模型时)
+ *   - 各档 worker 子代理的会话(视觉工作由 worker 直接读图,不再有独立 visual 系角色)
  *
  * 同步 handler、无任何 await,规避 session replacement 后访问 stale ctx 的问题
  * (参考 pi-dev-context / openviking 扩展的教训),勿在 handler 中引入 await。
@@ -19,7 +19,7 @@ const GUIDANCE = `
 - 产出可视化结果(UI 页面、图表、图形、仿真画面)后,主动截图/导出并读图自检,再交付
 - 对比类任务(设计稿 vs 实现、修改前后)必须读图逐项核对,列出差异及位置
 - 读不清时用 bash 预处理(放大、裁剪、转格式,如 pdftoppm / ImageMagick)后再读;仍不确定的细节明确标注 unclear,不要编造
-- 需要隔离的深度图像分析可派 visual / visual-worker 子代理,避免大图占用主上下文
+- 需要隔离的图像分析(避免大图占用主上下文)可派 worker-flash-low(一次性判读)或按难度选对应档位的 worker 子代理
 </vision_capability>`;
 
 export default function (pi: ExtensionAPI) {

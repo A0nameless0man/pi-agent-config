@@ -9,8 +9,8 @@
 ## pi-agent-config 仓库维护
 
 `~/.pi/agent` 是 git clone 的多机同步配置仓库（A0nameless0man/pi-agent-config）。
-机器清单、各机 profile、内网 endpoint 等敏感细节见 openviking 记忆
-`viking://user/hugua/memories/entities/irail_pi_deployment.md`。
+机器与 profile：hg-dev-ubuntu / hg-dev-debian / irail 用 `zhipu-coding-company`（公司订阅），
+Windows 本机用 `zhipu-coding-personal`（个人订阅）（用户指定，2026-11-23）；key、内网 endpoint 等敏感细节不写入本仓库。
 
 ### 模板与派生文件
 
@@ -19,9 +19,9 @@ git 只跟踪**模板与源码**；实际生效文件是**机器本地派生物�
 | git 跟踪 | 本地生成（不入库） |
 |---|---|
 | `settings.json.example` | `settings.json`（switch-model 生成） |
-| `agents/{planner,reviewer,scout,visual,visual-worker,worker,Designer}.md.example` | `agents/<role>.md`（switch-model 生成） |
+| `agents/{planner,reviewer,worker,worker-high,worker-flash,worker-flash-low}.md.example` | `agents/<role>.md`（switch-model 生成） |
 | `models.json.example`（仅公开标准 provider） | `models.json`（可含内网自建 provider） |
-| `skills/`、`extensions/`、`install.sh`、`switch-model.*`、`model-profiles.json`（角色分工：scout/visual=flash，visual-worker=视觉+max，planner/Designer/reviewer/worker=pro，Designer=pro+medium；visual/visual-worker 需多模态模型——zhipu 系用 glm-5.3-flash，deepseek 用 deepseek-flash（V4.1 Flash 原生多模态，2026-09 起）） | `auth.json`、`extensions/openviking-memory/openviking-config.json`、`~/.openviking/ovcli.conf`（官方扩展凭证）、`skills/glm-plan-usage/team.json` |
+| `skills/`、`extensions/`、`install.sh`、`switch-model.*`、`model-profiles.json`（worker 四档高低搭配 + planner/reviewer，详见 AGENTS.md 角色模型分工；zhipu 系三个 profile 只用 glm-5.4 + glm-5.3-flash 两个模型） | `auth.json`、`extensions/openviking-memory/openviking-config.json`、`~/.openviking/ovcli.conf`（官方扩展凭证）、`skills/glm-plan-usage/team.json` |
 
 **核心规则：持久改动必须写 `.example` 模板**。直接编辑实际文件（settings.json、agents/*.md）
 会在下次 switch-model / refresh 时被模板覆盖。
@@ -34,7 +34,11 @@ Windows（改模板/加 skill/插件源码）
   → 各 Linux 机器: cd ~/.pi/agent && git pull && bash switch-model.sh refresh
 ```
 
-- refresh 自动检测激活 profile 并从模板重新生成实际文件
+- refresh 自动检测激活 profile 并从模板重新生成实际文件（provider+model 精确匹配优先；
+  主模型被 `/model` 切到同 provider 的其他模型时按 provider 识别，且保留该主模型不覆盖）
+- **模板里删掉某个角色后，各机要手动删对应派生文件** `agents/<role>.md`：switch-model 只生成、
+  从不删除无模板的 `.md`（本机私有 agent 如 qwen-vision、glla 托管的 Designer.md / Explore.md 都属此类，
+  不能一律清理）。残留的旧角色定义会继续被 pi-subagents 当作可用类型加载
 - packages 新增（如 `npm:pi-sessions`）要写进 `settings.json.example` 的 packages 数组，
   各机 pull + refresh 后 pi 启动时自动安装（或手动 `pi install npm:<pkg>`）
 - **`pi-sessions` 已改为自维护 fork**：`git:github.com/A0nameless0man/pi-sessions`（原 `npm:pi-sessions`）。
