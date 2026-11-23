@@ -1,7 +1,6 @@
 {
   "defaultProvider": "deepseek",
-  "defaultModel": "deepseek-v4-pro",
-  "lastChangelogVersion": "0.84.1",
+  "defaultModel": "deepseek-flash",
   "theme": "dark",
   "defaultThinkingLevel": "high",
   "packages": [

@@ -26,7 +26,9 @@
  *   node switch-model.mjs                     # 列出当前 + 可用 profile
  *   node switch-model.mjs <profile>           # 切换:从 .example 重新生成实际文件
  *   node switch-model.mjs refresh             # 检测当前激活 profile,从 .example 重新
- *                                             # 生成实际文件(同步模板改动用)
+ *                                             # 生成实际文件(同步模板改动用)。主模型若是经
+ *                                             # /model 切到同 provider 的其他模型,refresh 保留
+ *                                             # 该选择,只重新派生 agents 与模板键
  *
  * 新机器引导:clone 后先运行 `bash switch-model.sh <profile>` 生成全部实际文件。
  */
@@ -97,13 +99,21 @@ async function readActualSettings() {
   }
 }
 
-/** 按 provider+model 匹配唯一 profile;不匹配返回 null */
+/**
+ * 识别激活 profile:provider+model 精确匹配优先;不唯一时退化为 provider 唯一匹配——
+ * 用户 /model 切到 profile 默认模型之外的同 provider 模型(如 glm-5.3-flash)后,
+ * refresh 仍应认得出 profile,否则各机同步时派生文件无法重新生成。
+ * 返回 { name, exact };无匹配返回 null。
+ */
 function detectActiveProfile(profiles, settings) {
   if (!settings) return null;
-  const hits = Object.entries(profiles).filter(
-    ([, p]) => p.provider === settings.defaultProvider && p.model === settings.defaultModel,
+  const byProvider = Object.entries(profiles).filter(
+    ([, p]) => p.provider === settings.defaultProvider,
   );
-  return hits.length === 1 ? hits[0][0] : null;
+  const exact = byProvider.filter(([, p]) => p.model === settings.defaultModel);
+  if (exact.length === 1) return { name: exact[0][0], exact: true };
+  if (byProvider.length === 1) return { name: byProvider[0][0], exact: false };
+  return null;
 }
 
 /**
@@ -141,8 +151,10 @@ async function syncModelsJson() {
 /**
  * 核心:从 .example 模板 + profile 重新生成 settings.json 与 agents/<role>.md。
  * 实际文件是派生物——切换与 refresh 走同一条路径,保证语义一致。
+ * keepMainModel:refresh 经 provider 识别(profile 默认模型≠当前主模型)时为 true,
+ * 保留用户 /model 选定的主模型与推理强度,不被 profile 默认值覆盖。
  */
-async function applyProfile(profiles, name) {
+async function applyProfile(profiles, name, { keepMainModel = false } = {}) {
   const profile = profiles[name];
   if (!profile) {
     throw new Error(`profile not found: ${name}`);
@@ -163,8 +175,11 @@ async function applyProfile(profiles, name) {
     }
   }
   settings.defaultProvider = profile.provider;
-  settings.defaultModel = profile.model;
-  if (profile.thinking) settings.defaultThinkingLevel = profile.thinking;
+  const keepModel =
+    keepMainModel && actual !== null && actual.defaultProvider === profile.provider && !!actual.defaultModel;
+  settings.defaultModel = keepModel ? actual.defaultModel : profile.model;
+  const thinking = keepModel ? (actual.defaultThinkingLevel ?? profile.thinking) : profile.thinking;
+  if (thinking) settings.defaultThinkingLevel = thinking;
   const trailing = exampleRaw.endsWith("\n") ? "\n" : "";
   await writeFile(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}${trailing}`, "utf8");
 
@@ -231,16 +246,22 @@ async function main() {
 
   // refresh: 从实际 settings.json 检测激活 profile,再走统一生成路径
   let name = target;
+  let keepMainModel = false;
   if (target === "refresh") {
     const settings = await readActualSettings();
-    name = detectActiveProfile(profiles, settings);
-    if (!name) {
-      console.error("Error: 无法从 settings.json 唯一识别当前 profile(缺失或 provider/model 不匹配)");
+    const detected = detectActiveProfile(profiles, settings);
+    if (!detected) {
+      console.error("Error: 无法从 settings.json 识别当前 profile(缺失,或 provider/model 不唯一匹配)");
       console.error("请显式指定: bash switch-model.sh <profile>");
       process.exitCode = 1;
       return;
     }
-    console.log(`Detected active profile: ${name}`);
+    name = detected.name;
+    keepMainModel = !detected.exact;
+    console.log(
+      `Detected active profile: ${name}` +
+        (detected.exact ? "" : ` (by provider; 主模型 ${settings.defaultModel} 保留不覆盖)`),
+    );
   } else if (!profiles[target]) {
     console.error(`Error: profile not found: ${target}`);
     console.error("");
@@ -251,9 +272,14 @@ async function main() {
   }
 
   const profile = profiles[name];
-  const { results } = await applyProfile(profiles, name);
+  const { results } = await applyProfile(profiles, name, { keepMainModel });
+  // 汇总行回读实际写入的 settings,主模型保留时才不会误报 profile 默认档
+  const written = await readActualSettings();
   console.log(`${target === "refresh" ? "Refreshed" : "Switched to"}: ${name}`);
-  console.log(`  default: ${profile.provider}/${profile.model} (thinking: ${profile.thinking ?? "-"})`);
+  console.log(
+    `  default: ${written.defaultProvider}/${written.defaultModel} (thinking: ${written.defaultThinkingLevel ?? "-"})` +
+      (keepMainModel ? " [主模型为 /model 选择,保留]" : ""),
+  );
   for (const r of results) console.log(r);
   console.log("Note: 对新会话 / 之后新 spawn 的子 agent 生效;当前会话立刻换用 /model。");
 }
