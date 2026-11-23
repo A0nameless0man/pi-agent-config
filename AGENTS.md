@@ -81,6 +81,7 @@ pi 核心工具仅包含 read / write / edit / bash,**没有 `task` 工具**。�
 -   智谱系三个 profile(coding-personal / coding-company / 按量 zhipu)只用两个模型:旗舰 = glm-5.4(多模态),快速档 = glm-5.3-flash(多模态);deepseek profile 只有 `deepseek-flash` 一个模型(多模态),`worker-high` 与 `worker-flash` 落在同一档
 -   订阅分配(用户指定):Windows 本机用 `zhipu-coding-personal`(个人订阅),其余机器一律 `zhipu-coding-company`(公司订阅)
 -   `Explore` — 由 glla 管理、继承父模型,不在 profile 里
+-   `agents/<role>.md` 是 switch-model 从 `.example` 模板 + profile 生成的**派生文件**:发现某角色模型/档位不对(哪怕是为了绕开子代理报错),改 `model-profiles.json` 或模板后重新生成,**不要直接编辑派生文件**——它会在下次 refresh 被覆盖,且只改了本机、各机漂移(2026-11-23 有会话为绕开子代理 400 直接把全部角色改成 5.3-flash)。例外:没有模板的本机私有 agent(如 qwen-vision)与 glla 托管的文件
 -   profile 派生与多机同步机制(.example 模板、install.sh、key 中转)详见 extensions/pi-dev-context/PI-DEV.md(仅在本目录工作时自动注入)
 
 **视觉任务约束**(涉及图像理解、或产出需要"看"来验证的任务时强制执行):
