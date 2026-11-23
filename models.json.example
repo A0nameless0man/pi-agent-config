@@ -130,7 +130,7 @@
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
-            "low": "high",
+            "low": "low",
             "medium": "high",
             "high": "high",
             "max": "max"
@@ -164,7 +164,7 @@
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
-            "low": "high",
+            "low": "low",
             "medium": "high",
             "high": "high",
             "max": "max"
@@ -241,7 +241,7 @@
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
-            "low": "high",
+            "low": "low",
             "medium": "high",
             "high": "high",
             "max": "max"
@@ -270,12 +270,47 @@
           }
         },
         {
+          "id": "glm-5.4",
+          "name": "GLM 5.4",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": "high",
+            "high": "high",
+            "max": "max"
+          },
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 200000,
+          "maxTokens": 65536,
+          "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": true,
+            "maxTokensField": "max_tokens",
+            "thinkingFormat": "zai",
+            "zaiToolStream": true
+          },
+          "cost": {
+            "input": 1.143,
+            "output": 4,
+            "cacheRead": 0.286,
+            "cacheWrite": 1.143
+          },
+          "promptCache": {
+            "short": 600
+          }
+        },
+        {
           "id": "glm-5.3-flash",
           "name": "GLM 5.3 Flash",
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
-            "low": "high",
+            "low": "low",
             "medium": "high",
             "high": "high",
             "max": "max"
@@ -352,7 +387,7 @@
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
-            "low": "high",
+            "low": "low",
             "medium": "high",
             "high": "high",
             "max": "max"
@@ -381,12 +416,47 @@
           }
         },
         {
+          "id": "glm-5.4",
+          "name": "GLM 5.4",
+          "reasoning": true,
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": "low",
+            "medium": "high",
+            "high": "high",
+            "max": "max"
+          },
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 200000,
+          "maxTokens": 65536,
+          "compat": {
+            "supportsStore": false,
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": true,
+            "maxTokensField": "max_tokens",
+            "thinkingFormat": "zai",
+            "zaiToolStream": true
+          },
+          "cost": {
+            "input": 1.143,
+            "output": 4,
+            "cacheRead": 0.286,
+            "cacheWrite": 1.143
+          },
+          "promptCache": {
+            "short": 600
+          }
+        },
+        {
           "id": "glm-5.3-flash",
           "name": "GLM 5.3 Flash",
           "reasoning": true,
           "thinkingLevelMap": {
             "minimal": null,
-            "low": "high",
+            "low": "low",
             "medium": "high",
             "high": "high",
             "max": "max"
