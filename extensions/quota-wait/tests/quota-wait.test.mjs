@@ -139,6 +139,30 @@ test("速率限制 1302 也走指数退避(30s 起),状态栏标注限流", asyn
 	assert.ok(notes.some(([type, text]) => type === "warning" && text.includes("限流触发")));
 });
 
+test("模型过载 1305 也走指数退避(30s 起),状态栏标注繁忙", async () => {
+	realClock();
+	const msg = '429: {"code":"1305","message":"该模型当前访问量过大，请您稍后再试"}';
+	const { statuses, notes } = await run(handlers.get("agent_before_settle"), makeEvent("error", msg), { abortAfter: true });
+	const wait = requestedWait(statuses);
+	assert.match(wait, /繁忙等待/);
+	assert.match(wait, /指数退避探测/);
+	assert.match(wait, /30s/);
+	assert.ok(notes.some(([type, text]) => type === "warning" && text.includes("繁忙触发")));
+});
+
+test("1305 以 code 为主要特征:文案改写仍识别;仅带\"稍后再试\"的其他错误不误纳", async () => {
+	realClock();
+	const reworded = await run(handlers.get("agent_before_settle"), makeEvent("error", '429: {"code":"1305","message":"model is busy"}'), {
+		abortAfter: true,
+	});
+	assert.match(requestedWait(reworded.statuses), /繁忙等待/);
+
+	// Esc 中断已结束上一轮 episode,这里从干净状态开始
+	const generic = await run(handlers.get("agent_before_settle"), makeEvent("error", "503: 服务暂不可用,请稍后再试"));
+	assert.equal(generic.result, undefined);
+	assert.equal(requestedWait(generic.statuses), "");
+});
+
 test("解析出的重置时刻超过 12h 预算,仍按 1h 一段等待", async () => {
 	const { result, statuses } = await run(handlers.get("agent_before_settle"), makeEvent("error", ZHIPU_1308(13 * 3600 * 1000)), {
 		abortAfter: true,

@@ -16,9 +16,11 @@
  * 剔除后投影不再以 assistant 结尾,`canContinue` 成立(commit 后 _refreshFinalizedContext
  * 会重设 agent.state.messages,continue 的前置校验也通过)。
  *
- * 触发范围(两类都纳入,都用同一套指数退避):
+ * 触发范围(三类都纳入,都用同一套指数退避):
  * - 配额/账单耗尽(如智谱 1308"已达到 5 小时的使用上限"):错误体常带重置时刻,优先等到那一刻
- * - 速率限制(如智谱 1302"已达到速率限制"):无重置时刻,走指数退避探测
+ * - 速率限制(如智谱 1302"已达到速率限制"):账号级限速,无重置时刻,走指数退避探测
+ * - 模型过载(如智谱 1305"该模型当前访问量过大,请您稍后再试"):服务端容量问题,与账号无关,
+ *   无重置时刻,走指数退避探测;以错误体 code 为主要特征,智谱改文案也不漏
  * 分层理由:pi 自己已对 429 做 2s/4s/8s 三次快退避,瞬时抖动在那一层就消化了;
  * 扩展接管的是"三次之后仍未恢复"的持续限流/耗尽,所以退避从 30s 起而非从 2s 起。
  *
@@ -72,9 +74,13 @@ const QUOTA_PATTERN =
 // 账号级速率限制(智谱 1302"已达到速率限制"、通用 429 措辞)。
 // 顺序上先判 QUOTA:1308 之类可能同时含两侧措辞,归到配额更准确(有重置时刻可等)。
 const RATE_LIMIT_PATTERN = /已达到速率限制|速率限制|请求频率|账户或账号.{0,6}限制|too many requests|\brate.?limit/i;
+// 模型侧过载(智谱 1305"该模型当前访问量过大,请您稍后再试"):服务端容量不足,与账号限流无关。
+// 智谱国内外两端文案不同但 code 一致,所以以 code 为主要特征、措辞为辅。
+// 不收"稍后再试"这类通用措辞:5xx 等瞬时错误也常带它,而那类错误按设计不该在此等待。
+const OVERLOADED_PATTERN = /"code"\s*:\s*"?1305(?![0-9])|访问量过大/i;
 
-type ThrottleKind = "quota" | "rateLimit";
-const KIND_LABEL: Record<ThrottleKind, string> = { quota: "配额", rateLimit: "限流" };
+type ThrottleKind = "quota" | "rateLimit" | "overloaded";
+const KIND_LABEL: Record<ThrottleKind, string> = { quota: "配额", rateLimit: "限流", overloaded: "繁忙" };
 // 目前只有智谱在错误体里给出 "2026-09-24 18:23:28" 这种时刻
 const RESET_TIME_PATTERN = /(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/;
 // 解析结果超出这个跨度就不信它(宁可走退避探测)
@@ -108,6 +114,7 @@ function findErroredAssistant(event: AgentBeforeSettleEvent): { entryId: string;
 
 function classifyThrottle(errorMessage: string): ThrottleKind | null {
 	if (QUOTA_PATTERN.test(errorMessage)) return "quota";
+	if (OVERLOADED_PATTERN.test(errorMessage)) return "overloaded";
 	if (RATE_LIMIT_PATTERN.test(errorMessage)) return "rateLimit";
 	return null;
 }
@@ -291,7 +298,9 @@ export default function (pi: ExtensionAPI) {
 		} else {
 			desired = BACKOFF_BASE_MS * 2 ** current.backoffIndex;
 			current.backoffIndex += 1;
-			label = resetAt === undefined ? "未解析出重置时刻,退避探测" : "重置时刻已过,退避探测";
+			// 只有配额类错误体才可能带重置时刻;限流/过载本来就没有,"未解析出"会误导成解析失败
+			if (resetAt !== undefined) label = "重置时刻已过,退避探测";
+			else label = kind === "quota" ? "未解析出重置时刻,退避探测" : "指数退避探测";
 		}
 		const waitMs = Math.min(Math.max(desired, MIN_PROBE_GAP_MS), MAX_SINGLE_WAIT_MS, remainingBudget);
 		if (!current.notified) {
