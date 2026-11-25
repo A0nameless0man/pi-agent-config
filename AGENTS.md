@@ -251,6 +251,13 @@ pi -p --no-session "..."      # 临时运行，不保存会话
 -   支持 `&&` 链式执行:`cd /foo/bar && pytest tests`
 -   **禁止**在命令中使用 PowerShell 语法(`if ($?)`、`Set-Location` 等)
 
+### 网络代理(~/.proxy,按需加载,用户指定)
+
+-   **默认直连,无代理变量**:各 Linux/WSL 机器默认 shell 不带任何 proxy 环境变量(按需加载模式,`~/.bashrc` 的自动 source 块已移除)。外网请求缓慢或失败(典型:github.com:443 间歇性阻断)时,**在同一命令内** `source ~/.proxy` 加载代理后再执行,如 `source ~/.proxy && git clone ...`
+-   **会话独立性注意**:bash 工具每次调用都是独立 shell,source 过的代理变量不延续——需要代理的整段命令必须在同一次调用内先 source 再执行
+-   **内部域名必须直连(勿被代理劫持)**:`~/.proxy` 内置 `NO_PROXY`/`no_proxy`(localhost、127.0.0.1、::1、RFC1918 私有网段 10/8、172.16/12、192.168/16,以及公司域名 `northgofront.com`/`.northgofront.com`)——公司内部服务(Forgejo、内网 endpoint)经代理**不通**,必须直连。修改或新建各机的 `~/.proxy` 时**必须**保留全部排除项,否则内部请求走代理会静默失败。注意:公司 git 服务(Forgejo)**仅 HTTP 未开 https**(用户指定),探测/clone 用 `http://git.northgofront.com`,勿因 https 失败误判服务故障
+-   **适用范围**:此条仅适用于存在 `~/.proxy` 的 Linux/WSL 机器;Windows 本机无此文件,代理由系统层(clash)处理
+
 ### 编码问题
 
 Git Bash 默认 UTF-8,中文输出通常正常。如遇乱码:
