@@ -34,6 +34,8 @@ Windows（改模板/加 skill/插件源码）
   → 各 Linux 机器: cd ~/.pi/agent && git pull && bash switch-model.sh refresh
 ```
 
+**"同步各机"的目标清单（用户指定，2026-11-25）**：共 4 台——`hg-dev-ubuntu`、`hg-dev-debian`、`irail`（均 ssh）+ 本机 WSL（Windows 宿主的 WSL Ubuntu，用 `wsl.exe -e bash -c '...'` 访问，非 ssh）。**server-wsl 不在同步范围**。github 直连阻断时，远端 `source ~/.proxy` 后再 pull。AGENTS.md / PI-DEV.md 这类非派生文件只需 pull；settings/agents 派生文件模板变更才需 refresh。
+
 - refresh 自动检测激活 profile 并从模板重新生成实际文件（provider+model 精确匹配优先；
   主模型被 `/model` 切到同 provider 的其他模型时按 provider 识别，且保留该主模型不覆盖）
 - **模板里删掉某个角色后，各机要手动删对应派生文件** `agents/<role>.md`：switch-model 只生成、
