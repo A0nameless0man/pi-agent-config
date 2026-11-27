@@ -39,7 +39,7 @@
 
 ## MVP 范围(已完成并验证)
 
-✅ compress / decompress 工具 · ✅ prune · ✅ mNNNNN 标签 · ✅ 配对保护 · ✅ 持久化与恢复 · ✅ 自然边界用量提示
+✅ compress / decompress 工具 · ✅ prune · ✅ mNNNNN 标签 · ✅ 配对保护 · ✅ 持久化与恢复 · ✅ 自然边界用量提示 · ✅ 幻觉标签双重防护（promptGuidelines/nudge 事前告知“勿在输出中包含 <acp-id>”+ message_end 事后剥离）
 
 ## pi ≥0.99 兼容性修复(2026-09-30)
 

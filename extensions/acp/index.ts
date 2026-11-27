@@ -431,7 +431,8 @@ function nudgeText(tokens: number, limits: AcpLimits, hint = ""): string {
 		`Usage is above the ~${limits.soft.toLocaleString()} working band. When current work reaches a stopping point, ` +
 		`use \`compress\` (mNNNNN refs from <acp-id> tags as startId/endId) to summarize completed ranges ` +
 		`and free ~${need.toLocaleString()} tokens, bringing usage toward ~${limits.target.toLocaleString()}. ` +
-		`If everything is genuinely still in active use, continue and compress later.` +
+		`If everything is genuinely still in active use, continue and compress later. ` +
+		`Do not include <acp-id> tags in your output — they are system-injected refs.` +
 		hint
 	);
 }
@@ -958,6 +959,10 @@ export default function acpExtension(pi: ExtensionAPI): void {
 				"refs from <acp-id> tags and write a complete technical summary.",
 			"When old compress blocks accumulate, distill them: compress with startId/endId as block refs (bN..bM) " +
 				"replaces several old summaries with one higher-tier summary.",
+			// 模型模仿输出里的 <acp-id> 会把假 ref 写进 transcript(compress 按位置分配号,
+			// 假号指向错位),message_end 剥离只是兜底;事前告知从源头避免
+			"<acp-id> tags are system-injected message references — do not include them in your output. " +
+				"To reference a message, pass its mNNNNN/bN value as a compress parameter instead.",
 		],
 		parameters: Type.Object({
 			content: Type.Array(
